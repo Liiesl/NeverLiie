@@ -60,7 +60,7 @@ class ResultDelegate(QStyledItemDelegate):
         self.h_margin = 12
         self.v_margin = 6
         self.row_height = 64
-        # [FIX] Cache icons to prevent massive RAM spikes during repaint/resize loops
+        # Cache icons to prevent IO/RAM spikes during repaint
         self._icon_cache = {}
 
     def sizeHint(self, option, index):
@@ -104,7 +104,6 @@ class ResultDelegate(QStyledItemDelegate):
         icon_rect = QRect(icon_x, icon_y, icon_size, icon_size)
         
         if item_data.icon_path:
-            # [FIX] Use cached icon instead of creating new QIcon/QFileInfo every frame
             if item_data.icon_path not in self._icon_cache:
                 self._icon_cache[item_data.icon_path] = self.icon_provider.icon(QFileInfo(item_data.icon_path))
             
@@ -144,6 +143,11 @@ class LauncherWindow(QWidget):
         super().__init__()
         self.core = core_app
         self.query_thread = None
+        
+        # [FIX] Stable Anchor Variable
+        # Stores the theoretical Y position of the window when in Compact Mode.
+        # This prevents calculation drift during rapid animations.
+        self.base_y_anchor = None
         
         self.setup_ui()
         self.setup_styling()
@@ -310,6 +314,18 @@ class LauncherWindow(QWidget):
         geo.setHeight(self.compact_h_total)
         self.setGeometry(geo)
 
+    def showEvent(self, event):
+        # [FIX] Capture the anchor position when window appears.
+        # We calculate 'base_y_anchor' as the Y position if the window were Compact.
+        # This gives us a mathematically stable reference point for all animations.
+        current_y = self.y()
+        current_h = self.height()
+        expansion_diff = current_h - self.compact_h_total
+        
+        # Reverse the expansion bias (15% up) to find the stable compact Y
+        self.base_y_anchor = current_y + (expansion_diff * 0.15)
+        super().showEvent(event)
+
     def go_back_click(self, event):
         self.core.exit_extension_mode()
 
@@ -357,7 +373,6 @@ class LauncherWindow(QWidget):
     # --- LOGIC ---
 
     def on_text_edited(self, text):
-        # 1. Custom View (Page 1) - Pass through immediately
         if self.content_stack.currentIndex() == 1:
             widget = self.content_stack.currentWidget()
             if hasattr(widget, "filter_items"):
@@ -366,29 +381,20 @@ class LauncherWindow(QWidget):
 
         stripped = text.strip()
         lower_text = stripped.lower()
-
-        # 2. Define Whitelist for Short Queries
-        # These will trigger a search even if they are under 3 characters
         allow_short = {"ai"} 
-
-        # 3. Validation Logic
-        # Search IF: (Length >= 3) OR (Text matches a whitelist item exactly)
         should_search = len(stripped) >= 3 or lower_text in allow_short
 
         if not should_search:
-            # Update footer text based on state
             if len(stripped) == 0:
                 self.footer_lbl.setText("Start typing...")
             else:
                 self.footer_lbl.setText(f"Type {3 - len(stripped)} more chars...")
             
-            # Clear and Collapse
             self.result_list.clear()
             self.animate_resize(0, 0)
             self.search_timer.stop()
             return
 
-        # 4. Valid -> Start Debounce Timer
         self.search_timer.start()
 
     def perform_search(self):
@@ -466,16 +472,21 @@ class LauncherWindow(QWidget):
             return
 
         self.shadow.setEnabled(False)
-        
-        # [FIX] Disable list updates during resize to avoid massive repainting 
-        # and backing store reallocation spikes
         self.result_list.setUpdatesEnabled(False)
         
-        height_diff = target_total_h - current.height()
-        bias = 0.15 
-        new_y = current.y() - int(height_diff * bias)
+        # [FIX] MATH STABILITY
+        # Instead of calculating new_y based on the drifting 'current.y()',
+        # we calculate it based on the stable 'self.base_y_anchor'.
+        # Target Y = Anchor - (Expansion Amount * Bias)
         
-        target_rect = QRect(current.x(), new_y, current.width(), target_total_h)
+        if self.base_y_anchor is None:
+            self.base_y_anchor = current.y()
+
+        expansion = target_total_h - self.compact_h_total
+        bias = 0.15 # 15% Up, 85% Down
+        
+        target_y = int(self.base_y_anchor - (expansion * bias))
+        target_rect = QRect(current.x(), target_y, current.width(), target_total_h)
         
         self.anim_geometry.stop()
         self.anim_geometry.setStartValue(current)
@@ -483,7 +494,6 @@ class LauncherWindow(QWidget):
         self.anim_geometry.start()
 
     def on_animation_finished(self):
-        # [FIX] Re-enable list updates and shadow after animation
         self.result_list.setUpdatesEnabled(True)
         self.shadow.setEnabled(True)
         
