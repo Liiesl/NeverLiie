@@ -60,6 +60,8 @@ class ResultDelegate(QStyledItemDelegate):
         self.h_margin = 12
         self.v_margin = 6
         self.row_height = 64
+        # [FIX] Cache icons to prevent massive RAM spikes during repaint/resize loops
+        self._icon_cache = {}
 
     def sizeHint(self, option, index):
         size_data = index.data(Qt.SizeHintRole)
@@ -102,7 +104,11 @@ class ResultDelegate(QStyledItemDelegate):
         icon_rect = QRect(icon_x, icon_y, icon_size, icon_size)
         
         if item_data.icon_path:
-            icon = self.icon_provider.icon(QFileInfo(item_data.icon_path))
+            # [FIX] Use cached icon instead of creating new QIcon/QFileInfo every frame
+            if item_data.icon_path not in self._icon_cache:
+                self._icon_cache[item_data.icon_path] = self.icon_provider.icon(QFileInfo(item_data.icon_path))
+            
+            icon = self._icon_cache[item_data.icon_path]
             icon.paint(painter, icon_rect, Qt.AlignCenter)
         else:
             painter.setBrush(QColor(THEME["surface"]))
@@ -149,14 +155,12 @@ class LauncherWindow(QWidget):
 
         self.search_timer = QTimer(self)
         self.search_timer.setSingleShot(True)
-        self.search_timer.setInterval(100)
+        self.search_timer.setInterval(300)
         self.search_timer.timeout.connect(self.perform_search)
         
         self.search_input.textEdited.connect(self.on_text_edited)
         self.search_input.returnPressed.connect(self.execute_selection)
         
-        # We don't connect result_list signals directly here anymore for execution,
-        # because the user might be on a different page.
         self.result_list.itemActivated.connect(self.execute_selection)
         self.result_list.currentItemChanged.connect(self.update_footer)
         
@@ -187,7 +191,6 @@ class LauncherWindow(QWidget):
         search_layout.setContentsMargins(15, 0, 20, 0)
         search_layout.setSpacing(10)
         
-        # New: Back Button
         self.back_btn = QLabel("←")
         self.back_btn.setObjectName("BackButton")
         self.back_btn.setCursor(Qt.PointingHandCursor)
@@ -200,7 +203,6 @@ class LauncherWindow(QWidget):
         self.search_input.setPlaceholderText("Search apps, files, commands...")
         self.search_input.installEventFilter(self)
         
-        # New: Context Label (Breadcrumb)
         self.context_lbl = QLabel("")
         self.context_lbl.setObjectName("ContextLabel")
         self.context_lbl.hide()
@@ -219,7 +221,6 @@ class LauncherWindow(QWidget):
         # 3. Content Stack (Page 0: List, Page 1: Custom)
         self.content_stack = QStackedWidget()
         
-        # -- Page 0: Standard Result List --
         self.result_list = QListWidget()
         self.result_list.setItemDelegate(ResultDelegate())
         self.result_list.setVerticalScrollMode(QAbstractItemView.ScrollPerPixel)
@@ -315,7 +316,6 @@ class LauncherWindow(QWidget):
     # --- MODE SWITCHING ---
 
     def set_mode_root(self):
-        """Switch UI to default root search"""
         self.back_btn.hide()
         self.context_lbl.hide()
         self.search_icon_lbl.show()
@@ -323,18 +323,16 @@ class LauncherWindow(QWidget):
         self.search_input.setText("")
         self.search_input.setFocus()
         
-        # Clean up Custom View (Page 1)
         if self.content_stack.count() > 1:
             w = self.content_stack.widget(1)
             self.content_stack.removeWidget(w)
             w.deleteLater()
             
-        self.content_stack.setCurrentIndex(0) # Show list
+        self.content_stack.setCurrentIndex(0) 
         self.result_list.clear()
         self.animate_resize(0, 0)
 
     def set_mode_extension(self, ext_name, custom_widget=None):
-        """Switch UI to extension specific mode"""
         self.back_btn.show()
         self.search_icon_lbl.hide()
         self.context_lbl.setText(ext_name)
@@ -347,38 +345,53 @@ class LauncherWindow(QWidget):
             self.content_stack.addWidget(custom_widget)
             self.content_stack.setCurrentIndex(1)
             
-            # Force Expand for Custom View
             self.line.show()
             self.content_stack.show()
             self.footer.setStyleSheet(f"QFrame#Footer {{ border-top: 1px solid {THEME['surface']}; }}")
-            self.animate_geometry(600) # Default height for extensions
+            self.animate_geometry(600) 
         else:
-            # Scoped Search (Reuse list)
             self.content_stack.setCurrentIndex(0)
             self.result_list.clear()
-            self.perform_search() # Trigger search immediately
+            self.perform_search() 
 
     # --- LOGIC ---
 
     def on_text_edited(self, text):
-        # Page 1: Custom View
+        # 1. Custom View (Page 1) - Pass through immediately
         if self.content_stack.currentIndex() == 1:
             widget = self.content_stack.currentWidget()
             if hasattr(widget, "filter_items"):
                 widget.filter_items(text)
             return
 
-        # Page 0: Standard List
-        if not text.strip() and not self.core.active_extension:
-            self.footer_lbl.setText("Start typing...")
+        stripped = text.strip()
+        lower_text = stripped.lower()
+
+        # 2. Define Whitelist for Short Queries
+        # These will trigger a search even if they are under 3 characters
+        allow_short = {"ai"} 
+
+        # 3. Validation Logic
+        # Search IF: (Length >= 3) OR (Text matches a whitelist item exactly)
+        should_search = len(stripped) >= 3 or lower_text in allow_short
+
+        if not should_search:
+            # Update footer text based on state
+            if len(stripped) == 0:
+                self.footer_lbl.setText("Start typing...")
+            else:
+                self.footer_lbl.setText(f"Type {3 - len(stripped)} more chars...")
+            
+            # Clear and Collapse
             self.result_list.clear()
             self.animate_resize(0, 0)
             self.search_timer.stop()
-        else:
-            self.search_timer.start()
+            return
+
+        # 4. Valid -> Start Debounce Timer
+        self.search_timer.start()
 
     def perform_search(self):
-        # Only perform core search if we are on the main list
         if self.content_stack.currentIndex() != 0:
             return
 
@@ -425,7 +438,6 @@ class LauncherWindow(QWidget):
             self.animate_resize(count, total_content_height)
 
     def animate_resize(self, item_count, content_height):
-        # Don't resize if we are showing a custom extension view
         if self.content_stack.currentIndex() == 1:
             return
 
@@ -455,6 +467,10 @@ class LauncherWindow(QWidget):
 
         self.shadow.setEnabled(False)
         
+        # [FIX] Disable list updates during resize to avoid massive repainting 
+        # and backing store reallocation spikes
+        self.result_list.setUpdatesEnabled(False)
+        
         height_diff = target_total_h - current.height()
         bias = 0.15 
         new_y = current.y() - int(height_diff * bias)
@@ -467,15 +483,16 @@ class LauncherWindow(QWidget):
         self.anim_geometry.start()
 
     def on_animation_finished(self):
+        # [FIX] Re-enable list updates and shadow after animation
+        self.result_list.setUpdatesEnabled(True)
         self.shadow.setEnabled(True)
-        # If collapsed, hide separator
+        
         if self.geometry().height() <= self.compact_h_total + 2:
             self.line.hide()
             self.content_stack.hide()
             self.footer.setStyleSheet(f"QFrame#Footer {{ border-top: 1px solid transparent; }}")
 
     def update_footer(self):
-        # Only relevant for standard list
         if self.content_stack.currentIndex() == 0:
             count = self.result_list.count()
             if count == 0: return
@@ -485,14 +502,12 @@ class LauncherWindow(QWidget):
                 self.footer_lbl.setText(f"Action: {data.name}")
 
     def execute_selection(self):
-        # Page 1: Custom View
         if self.content_stack.currentIndex() == 1:
             widget = self.content_stack.currentWidget()
             if hasattr(widget, "handle_enter"):
                 widget.handle_enter()
             return
 
-        # Page 0: Standard List
         current = self.result_list.currentItem()
         if not current: return
         result_item = current.data(Qt.UserRole)
@@ -503,7 +518,6 @@ class LauncherWindow(QWidget):
 
     def eventFilter(self, obj, event):
         if obj == self.search_input and event.type() == QEvent.KeyPress:
-            # 1. Handle Escape
             if event.key() == Qt.Key_Escape:
                 if self.core.active_extension:
                     self.core.exit_extension_mode()
@@ -512,17 +526,13 @@ class LauncherWindow(QWidget):
                     self.core.hide_window()
                     return True
 
-            # 2. Handle Custom View Navigation
             if self.content_stack.currentIndex() == 1:
                 widget = self.content_stack.currentWidget()
                 if hasattr(widget, "handle_key"):
-                    # Check if key is a navigation key BEFORE passing to widget.
-                    # This allows normal typing to stay in the QLineEdit.
                     if event.key() in (Qt.Key_Up, Qt.Key_Down, Qt.Key_Return, Qt.Key_Enter, Qt.Key_Tab, Qt.Key_Backtab):
                         widget.handle_key(event)
                         return True
 
-            # 3. Handle Standard List Navigation
             if event.key() == Qt.Key_Down:
                 self.nav(1)
                 return True
