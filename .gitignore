@@ -3,3 +3,4 @@
 __pycache__/
 extensions/clipboard/media/
 extensions/clipboard/clipboard_history.db
+settings.json

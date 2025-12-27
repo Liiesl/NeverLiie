@@ -175,11 +175,6 @@ class App:
         self.active_extension = None
         self.window.set_mode_root()
 
-    def hide_window(self):
-        self.exit_extension_mode() # Reset state on close
-        self.watchdog.stop()
-        self.window.hide()
-
     def center_window(self):
         screen = self.qapp.primaryScreen().geometry()
         x = (screen.width() - self.window.width()) // 2

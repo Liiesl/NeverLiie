@@ -96,6 +96,6 @@ class ClipboardExtension(Extension):
         
     def get_extension_view(self, parent_window):
         # Return the Custom Raycast-like UI
-        return ClipboardView(self.core, parent_window)
+        return ClipboardView(self.context, parent_window)
 
 Plugin = ClipboardExtension

@@ -26,9 +26,9 @@ TEXT_EXTENSIONS = {
 }
 
 class ClipboardView(QWidget):
-    def __init__(self, core, parent=None):
+    def __init__(self, context, parent=None):
         super().__init__(parent)
-        self.core = core
+        self.context = context
         from . import _monitor
         self.monitor = _monitor
         
@@ -222,7 +222,7 @@ class ClipboardView(QWidget):
         if not item: return
         data = item.data(Qt.UserRole)
         
-        self.core.hide_window()
+        self.context.hide_window()
         import time
 
         if data['type'] == 'files':
