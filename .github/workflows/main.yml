@@ -28,12 +28,6 @@ jobs:
           script-name: main.py
           mode: standalone
           include-data-dir: 'extensions/=extensions/'
-          include-package: |
-            extensions.file_search
-            extensions.ai
-            extensions.clipboard
-            extensions.calculator
-            extensions.system_apps
           mingw64: true
           enable-plugins: pyside6
           company-name: "Liiesl"
