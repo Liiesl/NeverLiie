@@ -27,7 +27,7 @@ jobs:
         with:
           script-name: main.py
           mode: standalone
-          include-data-dir: 'extensions/clipboard/media=extensions/clipboard/media, extensions/file_search=extensions/file_search'
+          include-data-dir: 'extensions/=extensions/'
           mingw64: true
           enable-plugins: pyside6
           company-name: "Liiesl"
