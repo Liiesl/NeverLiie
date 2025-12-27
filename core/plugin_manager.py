@@ -8,6 +8,8 @@ class PluginManager:
     def __init__(self, core_app):
         self.extensions = []
         self.core = core_app
+        # Shortcut to settings
+        self.settings = core_app.settings
 
     def load_extensions(self, extensions_dir):
         if not os.path.exists(extensions_dir):
@@ -27,21 +29,21 @@ class PluginManager:
             sys.modules[f"ext_{name}"] = module
             spec.loader.exec_module(module)
             
-            # --- FIX: Track loaded classes to prevent duplicates ---
             loaded_classes = set()
 
             for attr_name in dir(module):
                 attr = getattr(module, attr_name)
                 
-                # Check if it is a class, inherits Extension, and isn't the base class itself
                 if isinstance(attr, type) and issubclass(attr, Extension) and attr is not Extension:
-                    
-                    # Check if we already loaded this exact class from this module
                     if attr not in loaded_classes:
                         print(f"[Core] Loaded Extension: {name}")
                         instance = attr(self.core)
+                        
+                        # ASSIGN ID: Use the folder name as the unique ID
+                        instance.id = name 
+                        
                         self.extensions.append(instance)
-                        loaded_classes.add(attr) # Mark as loaded
+                        loaded_classes.add(attr)
                         
         except Exception as e:
             print(f"[Error] Failed to load {name}: {e}")
@@ -49,11 +51,13 @@ class PluginManager:
     def query_all(self, text):
         results = []
         for ext in self.extensions:
-            try:
-                items = ext.on_input(text)
-                results.extend(items)
-            except Exception as e:
-                print(f"Error in extension: {e}")
+            # CHECK SETTINGS: Only query if enabled
+            if self.settings.is_extension_enabled(ext.id):
+                try:
+                    items = ext.on_input(text)
+                    results.extend(items)
+                except Exception as e:
+                    print(f"Error in extension {ext.id}: {e}")
         
         results.sort(key=lambda x: x.score, reverse=True)
         return results

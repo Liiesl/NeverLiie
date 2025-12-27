@@ -1,3 +1,5 @@
 **pycache**/
 *.pyc
 __pycache__/
+extensions/clipboard/media/
+extensions/clipboard/clipboard_history.db

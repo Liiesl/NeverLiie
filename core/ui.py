@@ -3,7 +3,7 @@ from PySide6.QtWidgets import (QWidget, QVBoxLayout, QLineEdit, QListWidget,
                                QListWidgetItem, QGraphicsDropShadowEffect, 
                                QStyledItemDelegate, QStyle, QFileIconProvider,
                                QLabel, QHBoxLayout, QFrame, QAbstractItemView,
-                               QSizePolicy)
+                               QSizePolicy, QStackedWidget)
 from PySide6.QtCore import (Qt, QSize, QRect, QTimer, QEvent, QFileInfo, 
                             QThread, Signal, Slot, QPropertyAnimation, 
                             QEasingCurve)
@@ -62,12 +62,9 @@ class ResultDelegate(QStyledItemDelegate):
         self.row_height = 64
 
     def sizeHint(self, option, index):
-        # FIX: Check if the item has a specific size hint set (from the calc widget)
-        # If so, use that height. Otherwise, use default row_height.
         size_data = index.data(Qt.SizeHintRole)
         if size_data and size_data.isValid():
             return QSize(option.rect.width(), size_data.height())
-            
         return QSize(option.rect.width(), self.row_height)
 
     def paint(self, painter, option, index):
@@ -88,20 +85,17 @@ class ResultDelegate(QStyledItemDelegate):
             painter.setPen(Qt.NoPen)
             painter.drawRoundedRect(card_rect, 12, 12)
             
-            # Accent Pill (Left side)
+            # Accent Pill
             pill_rect = QRect(card_rect.left() + 4, card_rect.top() + 12, 4, card_rect.height() - 24)
             painter.setBrush(QColor(THEME["accent"]))
             painter.drawRoundedRect(pill_rect, 2, 2)
 
-        # If this item uses a custom widget, we stop painting content here.
-        # The background drawn above will show through the transparent widget.
+        # Custom Widget Support (Inline)
         if item_data.widget_factory:
             painter.restore()
             return
 
         # --- STANDARD ITEM PAINTING ---
-        
-        # Icon
         icon_size = 28
         icon_x = card_rect.left() + 20
         icon_y = card_rect.top() + (card_rect.height() - icon_size) // 2
@@ -115,7 +109,6 @@ class ResultDelegate(QStyledItemDelegate):
             painter.setPen(Qt.NoPen)
             painter.drawEllipse(icon_rect)
 
-        # Text
         text_left = icon_rect.right() + 15
         text_width = card_rect.right() - text_left - 15
         
@@ -135,8 +128,8 @@ class ResultDelegate(QStyledItemDelegate):
 
 # --- WINDOW ---
 class LauncherWindow(QWidget):
-    VISUAL_WIDTH = 720
-    VISUAL_COMPACT_HEIGHT = 100 
+    VISUAL_WIDTH = 800 # Wider for split view
+    VISUAL_COMPACT_HEIGHT = 80 
     ROW_HEIGHT = 64
     MAX_VISIBLE_ITEMS = 6
     WINDOW_MARGIN = 50 
@@ -161,8 +154,13 @@ class LauncherWindow(QWidget):
         
         self.search_input.textEdited.connect(self.on_text_edited)
         self.search_input.returnPressed.connect(self.execute_selection)
+        
+        # We don't connect result_list signals directly here anymore for execution,
+        # because the user might be on a different page.
         self.result_list.itemActivated.connect(self.execute_selection)
         self.result_list.currentItemChanged.connect(self.update_footer)
+        
+        self.back_btn.mousePressEvent = self.go_back_click
 
     def setup_ui(self):
         self.setWindowFlags(Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.Tool)
@@ -181,22 +179,36 @@ class LauncherWindow(QWidget):
         self.inner_layout.setContentsMargins(0, 0, 0, 0)
         self.inner_layout.setSpacing(0)
 
-        # 1. Search Bar
+        # 1. Header (Search Bar + Nav)
         self.search_frame = QFrame()
         self.search_frame.setObjectName("SearchFrame")
         self.search_frame.setFixedHeight(60)
         search_layout = QHBoxLayout(self.search_frame)
-        search_layout.setContentsMargins(20, 0, 20, 0)
-        search_layout.setSpacing(15)
+        search_layout.setContentsMargins(15, 0, 20, 0)
+        search_layout.setSpacing(10)
         
+        # New: Back Button
+        self.back_btn = QLabel("←")
+        self.back_btn.setObjectName("BackButton")
+        self.back_btn.setCursor(Qt.PointingHandCursor)
+        self.back_btn.hide()
+
         self.search_icon_lbl = QLabel("🔎")
         self.search_icon_lbl.setObjectName("SearchIcon")
+        
         self.search_input = QLineEdit()
         self.search_input.setPlaceholderText("Search apps, files, commands...")
         self.search_input.installEventFilter(self)
         
+        # New: Context Label (Breadcrumb)
+        self.context_lbl = QLabel("")
+        self.context_lbl.setObjectName("ContextLabel")
+        self.context_lbl.hide()
+
+        search_layout.addWidget(self.back_btn)
         search_layout.addWidget(self.search_icon_lbl)
         search_layout.addWidget(self.search_input)
+        search_layout.addWidget(self.context_lbl)
 
         # 2. Separator
         self.line = QFrame()
@@ -204,16 +216,20 @@ class LauncherWindow(QWidget):
         self.line.setObjectName("Separator")
         self.line.hide()
 
-        # 3. List
+        # 3. Content Stack (Page 0: List, Page 1: Custom)
+        self.content_stack = QStackedWidget()
+        
+        # -- Page 0: Standard Result List --
         self.result_list = QListWidget()
         self.result_list.setItemDelegate(ResultDelegate())
         self.result_list.setVerticalScrollMode(QAbstractItemView.ScrollPerPixel)
-        # FIX: Must be False to allow items to have different heights
         self.result_list.setUniformItemSizes(False)
         self.result_list.setFocusPolicy(Qt.NoFocus)
         self.result_list.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.result_list.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Ignored)
-        self.result_list.hide()
+        
+        self.content_stack.addWidget(self.result_list)
+        self.content_stack.hide()
 
         # 4. Footer
         self.footer = QFrame()
@@ -227,7 +243,7 @@ class LauncherWindow(QWidget):
         
         self.inner_layout.addWidget(self.search_frame)
         self.inner_layout.addWidget(self.line)
-        self.inner_layout.addWidget(self.result_list)
+        self.inner_layout.addWidget(self.content_stack)
         self.inner_layout.addWidget(self.footer)
         
         self.main_layout.addWidget(self.container)
@@ -243,20 +259,34 @@ class LauncherWindow(QWidget):
             QWidget {{ font-family: "Segoe UI", sans-serif; }}
             QFrame#Container {{
                 background-color: {THEME['bg']};
-                border-radius: 16px;
+                border-radius: 12px;
                 border: 1px solid {THEME['border']};
             }}
             QFrame#SearchFrame {{ background: transparent; }}
-            QLabel#SearchIcon {{ font-size: 20px; color: {THEME['accent']}; }}
+            QLabel#SearchIcon {{ font-size: 20px; color: {THEME['subtext']}; }}
+            
+            QLabel#BackButton {{ 
+                font-size: 24px; color: {THEME['text']}; font-weight: bold;
+                padding: 4px; border-radius: 4px;
+            }}
+            QLabel#BackButton:hover {{ background: {THEME['surface']}; }}
+            
+            QLabel#ContextLabel {{ 
+                color: {THEME['subtext']}; font-weight: bold; 
+                background: {THEME['surface']}; padding: 4px 8px; border-radius: 6px;
+            }}
+
             QLineEdit {{
                 background: transparent; color: {THEME['text']};
                 border: none; font-size: 20px; font-weight: 500;
                 selection-background-color: {THEME['accent']}; selection-color: {THEME['bg']};
             }}
+            
             QFrame#Separator {{
                 color: {THEME['surface']}; background-color: {THEME['surface']};
                 border: none; min-height: 1px; max-height: 1px;
             }}
+            
             QListWidget {{ background: transparent; border: none; padding: 5px 0; outline: 0; }}
             QListWidget::item {{ border: none; padding: 0px; }}
             QListWidget::item:selected {{ background: transparent; }}
@@ -275,23 +305,85 @@ class LauncherWindow(QWidget):
             QLabel#FooterLabel {{ color: {THEME['subtext']}; font-size: 12px; font-weight: 600; }}
         """
         self.setStyleSheet(css)
-        
         geo = self.geometry()
         geo.setHeight(self.compact_h_total)
         self.setGeometry(geo)
 
+    def go_back_click(self, event):
+        self.core.exit_extension_mode()
+
+    # --- MODE SWITCHING ---
+
+    def set_mode_root(self):
+        """Switch UI to default root search"""
+        self.back_btn.hide()
+        self.context_lbl.hide()
+        self.search_icon_lbl.show()
+        self.search_input.setPlaceholderText("Search apps, files, commands...")
+        self.search_input.setText("")
+        self.search_input.setFocus()
+        
+        # Clean up Custom View (Page 1)
+        if self.content_stack.count() > 1:
+            w = self.content_stack.widget(1)
+            self.content_stack.removeWidget(w)
+            w.deleteLater()
+            
+        self.content_stack.setCurrentIndex(0) # Show list
+        self.result_list.clear()
+        self.animate_resize(0, 0)
+
+    def set_mode_extension(self, ext_name, custom_widget=None):
+        """Switch UI to extension specific mode"""
+        self.back_btn.show()
+        self.search_icon_lbl.hide()
+        self.context_lbl.setText(ext_name)
+        self.context_lbl.show()
+        self.search_input.setText("")
+        self.search_input.setPlaceholderText(f"Search in {ext_name}...")
+        self.search_input.setFocus()
+
+        if custom_widget:
+            self.content_stack.addWidget(custom_widget)
+            self.content_stack.setCurrentIndex(1)
+            
+            # Force Expand for Custom View
+            self.line.show()
+            self.content_stack.show()
+            self.footer.setStyleSheet(f"QFrame#Footer {{ border-top: 1px solid {THEME['surface']}; }}")
+            self.animate_geometry(600) # Default height for extensions
+        else:
+            # Scoped Search (Reuse list)
+            self.content_stack.setCurrentIndex(0)
+            self.result_list.clear()
+            self.perform_search() # Trigger search immediately
+
+    # --- LOGIC ---
+
     def on_text_edited(self, text):
-        if not text.strip():
+        # Page 1: Custom View
+        if self.content_stack.currentIndex() == 1:
+            widget = self.content_stack.currentWidget()
+            if hasattr(widget, "filter_items"):
+                widget.filter_items(text)
+            return
+
+        # Page 0: Standard List
+        if not text.strip() and not self.core.active_extension:
             self.footer_lbl.setText("Start typing...")
             self.result_list.clear()
-            self.animate_resize(0, 0) 
+            self.animate_resize(0, 0)
             self.search_timer.stop()
         else:
             self.search_timer.start()
 
     def perform_search(self):
+        # Only perform core search if we are on the main list
+        if self.content_stack.currentIndex() != 0:
+            return
+
         text = self.search_input.text()
-        if not text: return
+        
         if self.query_thread and self.query_thread.isRunning():
             self.query_thread.quit()
             self.query_thread.wait()
@@ -303,6 +395,7 @@ class LauncherWindow(QWidget):
 
     @Slot(list, str)
     def handle_results(self, results, query_text):
+        if self.content_stack.currentIndex() != 0: return
         if query_text != self.search_input.text(): return
 
         self.result_list.clear()
@@ -317,15 +410,12 @@ class LauncherWindow(QWidget):
                 l_item = QListWidgetItem()
                 l_item.setData(Qt.UserRole, item_data)
                 
-                # Check custom height logic
                 height = item_data.height
                 total_content_height += height
                 
-                # FIX: Set the SizeHint on the item so the Delegate can find it
                 l_item.setSizeHint(QSize(self.result_list.width(), height))
                 self.result_list.addItem(l_item)
                 
-                # If widget factory exists, create and set
                 if item_data.widget_factory:
                     widget = item_data.widget_factory()
                     self.result_list.setItemWidget(l_item, widget)
@@ -335,60 +425,74 @@ class LauncherWindow(QWidget):
             self.animate_resize(count, total_content_height)
 
     def animate_resize(self, item_count, content_height):
-        current_geo = self.geometry()
-        
+        # Don't resize if we are showing a custom extension view
+        if self.content_stack.currentIndex() == 1:
+            return
+
         if item_count == 0:
-            visual_h = self.VISUAL_COMPACT_HEIGHT
-            self.target_height = self.compact_h_total
+            target_h = self.compact_h_total
+            self.line.hide()
+            self.content_stack.hide()
+            self.footer.setStyleSheet(f"QFrame#Footer {{ border-top: 1px solid transparent; }}")
         else:
-            # Determine maximum visual list height
             max_list_h = self.MAX_VISIBLE_ITEMS * self.ROW_HEIGHT
-            
-            # Use actual content height, but clamp to max
-            list_h = min(content_height, max_list_h)
-            list_h += 10 # padding
-            
-            visual_h = self.VISUAL_COMPACT_HEIGHT + list_h
+            list_h = min(content_height, max_list_h) + 10
+            target_h = self.compact_h_total + list_h
             
             self.line.show()
-            self.result_list.show()
+            self.content_stack.show()
             self.footer.setStyleSheet(f"QFrame#Footer {{ border-top: 1px solid {THEME['surface']}; }}")
 
-        target_total_h = visual_h + (self.WINDOW_MARGIN * 2)
+        self.animate_geometry(target_h)
+
+    def animate_geometry(self, target_h):
+        current = self.geometry()
+        target_total_h = target_h if target_h == self.compact_h_total else target_h + (self.WINDOW_MARGIN * 2)
         
-        if current_geo.height() == target_total_h:
-            if item_count == 0: self.on_animation_finished()
+        if current.height() == target_total_h:
+            if target_h == self.compact_h_total: self.on_animation_finished()
             return
 
         self.shadow.setEnabled(False)
-
-        height_diff = target_total_h - current_geo.height()
-        bias = 0.15 
-        new_y = current_geo.y() - int(height_diff * bias)
         
-        target_rect = QRect(current_geo.x(), new_y, current_geo.width(), target_total_h)
+        height_diff = target_total_h - current.height()
+        bias = 0.15 
+        new_y = current.y() - int(height_diff * bias)
+        
+        target_rect = QRect(current.x(), new_y, current.width(), target_total_h)
         
         self.anim_geometry.stop()
-        self.anim_geometry.setStartValue(current_geo)
+        self.anim_geometry.setStartValue(current)
         self.anim_geometry.setEndValue(target_rect)
         self.anim_geometry.start()
 
     def on_animation_finished(self):
         self.shadow.setEnabled(True)
+        # If collapsed, hide separator
         if self.geometry().height() <= self.compact_h_total + 2:
             self.line.hide()
-            self.result_list.hide()
+            self.content_stack.hide()
             self.footer.setStyleSheet(f"QFrame#Footer {{ border-top: 1px solid transparent; }}")
 
     def update_footer(self):
-        count = self.result_list.count()
-        if count == 0: return
-        item = self.result_list.currentItem()
-        if item:
-            data = item.data(Qt.UserRole)
-            self.footer_lbl.setText(f"Open '{data.name}'")
+        # Only relevant for standard list
+        if self.content_stack.currentIndex() == 0:
+            count = self.result_list.count()
+            if count == 0: return
+            item = self.result_list.currentItem()
+            if item:
+                data = item.data(Qt.UserRole)
+                self.footer_lbl.setText(f"Action: {data.name}")
 
     def execute_selection(self):
+        # Page 1: Custom View
+        if self.content_stack.currentIndex() == 1:
+            widget = self.content_stack.currentWidget()
+            if hasattr(widget, "handle_enter"):
+                widget.handle_enter()
+            return
+
+        # Page 0: Standard List
         current = self.result_list.currentItem()
         if not current: return
         result_item = current.data(Qt.UserRole)
@@ -399,19 +503,39 @@ class LauncherWindow(QWidget):
 
     def eventFilter(self, obj, event):
         if obj == self.search_input and event.type() == QEvent.KeyPress:
+            # 1. Handle Escape
+            if event.key() == Qt.Key_Escape:
+                if self.core.active_extension:
+                    self.core.exit_extension_mode()
+                    return True
+                else:
+                    self.core.hide_window()
+                    return True
+
+            # 2. Handle Custom View Navigation
+            if self.content_stack.currentIndex() == 1:
+                widget = self.content_stack.currentWidget()
+                if hasattr(widget, "handle_key"):
+                    # Check if key is a navigation key BEFORE passing to widget.
+                    # This allows normal typing to stay in the QLineEdit.
+                    if event.key() in (Qt.Key_Up, Qt.Key_Down, Qt.Key_Return, Qt.Key_Enter, Qt.Key_Tab, Qt.Key_Backtab):
+                        widget.handle_key(event)
+                        return True
+
+            # 3. Handle Standard List Navigation
             if event.key() == Qt.Key_Down:
                 self.nav(1)
                 return True
             elif event.key() == Qt.Key_Up:
                 self.nav(-1)
                 return True
-            elif event.key() == Qt.Key_Escape:
-                self.core.hide_window()
-                return True
+                
         return super().eventFilter(obj, event)
 
     def nav(self, direction):
-        if not self.result_list.isVisible() or self.result_list.count() == 0: return
+        if self.content_stack.currentIndex() != 0: return
+        if not self.content_stack.isVisible() or self.result_list.count() == 0: return
+        
         curr = self.result_list.currentRow()
         new_idx = max(0, min(curr + direction, self.result_list.count() - 1))
         self.result_list.setCurrentRow(new_idx)
