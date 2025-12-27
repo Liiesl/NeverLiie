@@ -31,7 +31,6 @@ jobs:
           include-data-files: 'settings.json=settings.json'
           mingw64: true
           enable-plugins: pyside6
-          windows-icon-from-ico: assets/app_icon.ico
           company-name: "Liiesl"
           product-name: "NeverLiie"
           file-description: "NeverLiie Launcher"
