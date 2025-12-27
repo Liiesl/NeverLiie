@@ -29,11 +29,11 @@ jobs:
           mode: standalone
           include-data-dir: 'extensions/=extensions/'
           include-package: |
-            file_search
-            ai
-            clipboard
-            calculator
-            system_apps
+            extensions.file_search
+            extensions.ai
+            extensions.clipboard
+            extensions.calculator
+            extensions.system_apps
           mingw64: true
           enable-plugins: pyside6
           company-name: "Liiesl"
