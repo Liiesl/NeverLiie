@@ -1,6 +1,7 @@
 **pycache**/
 *.pyc
 __pycache__/
-extensions/clipboard/media/
+extensions/clipboard/media/*
+!extensions/clipboard/media/.gitkeep
 extensions/clipboard/clipboard_history.db
 settings.json
