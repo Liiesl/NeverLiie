@@ -1,6 +1,6 @@
 # api/types.py
 from dataclasses import dataclass
-from typing import Callable, Optional
+from typing import Callable, Optional, Any
 
 @dataclass
 class Action:
@@ -15,6 +15,12 @@ class ResultItem:
     id: str
     name: str
     description: str = ""
-    icon_path: Optional[str] = None # Path to icon or None
+    icon_path: Optional[str] = None 
     action: Optional[Action] = None
-    score: int = 0  # For sorting results from multiple extensions
+    score: int = 0
+    
+    # --- NEW FIELDS FOR CUSTOM UI ---
+    # A function that returns a QWidget instance
+    widget_factory: Optional[Callable[[], Any]] = None 
+    # Custom height for this item (default is 64)
+    height: int = 64

@@ -16,7 +16,7 @@ THEME = {
     "surface": "#38394B",
     "text": "#cdd6f4",
     "subtext": "#a6adc8",
-    "accent": "#89b4fa",  # Blue
+    "accent": "#89b4fa",
     "highlight": "#45475a",
     "border": "#45475a",
     "red": "#f38ba8"
@@ -62,6 +62,12 @@ class ResultDelegate(QStyledItemDelegate):
         self.row_height = 64
 
     def sizeHint(self, option, index):
+        # FIX: Check if the item has a specific size hint set (from the calc widget)
+        # If so, use that height. Otherwise, use default row_height.
+        size_data = index.data(Qt.SizeHintRole)
+        if size_data and size_data.isValid():
+            return QSize(option.rect.width(), size_data.height())
+            
         return QSize(option.rect.width(), self.row_height)
 
     def paint(self, painter, option, index):
@@ -76,15 +82,25 @@ class ResultDelegate(QStyledItemDelegate):
         full_rect = option.rect
         card_rect = full_rect.adjusted(self.h_margin, self.v_margin, -self.h_margin, -self.v_margin)
         
-        # Selection
+        # Selection Background
         if option.state & QStyle.State_Selected:
             painter.setBrush(QColor(THEME["surface"]))
             painter.setPen(Qt.NoPen)
             painter.drawRoundedRect(card_rect, 12, 12)
+            
+            # Accent Pill (Left side)
             pill_rect = QRect(card_rect.left() + 4, card_rect.top() + 12, 4, card_rect.height() - 24)
             painter.setBrush(QColor(THEME["accent"]))
             painter.drawRoundedRect(pill_rect, 2, 2)
 
+        # If this item uses a custom widget, we stop painting content here.
+        # The background drawn above will show through the transparent widget.
+        if item_data.widget_factory:
+            painter.restore()
+            return
+
+        # --- STANDARD ITEM PAINTING ---
+        
         # Icon
         icon_size = 28
         icon_x = card_rect.left() + 20
@@ -119,9 +135,8 @@ class ResultDelegate(QStyledItemDelegate):
 
 # --- WINDOW ---
 class LauncherWindow(QWidget):
-    # Dimensions
     VISUAL_WIDTH = 720
-    VISUAL_COMPACT_HEIGHT = 100 # Search (60) + Footer (40)
+    VISUAL_COMPACT_HEIGHT = 100 
     ROW_HEIGHT = 64
     MAX_VISIBLE_ITEMS = 6
     WINDOW_MARGIN = 50 
@@ -130,19 +145,15 @@ class LauncherWindow(QWidget):
         super().__init__()
         self.core = core_app
         self.query_thread = None
-        self.target_height = 0 
         
         self.setup_ui()
         self.setup_styling()
         
-        # Animation
         self.anim_geometry = QPropertyAnimation(self, b"geometry")
-        # OutExpo is snappier than OutQuint
         self.anim_geometry.setEasingCurve(QEasingCurve.OutExpo) 
-        self.anim_geometry.setDuration(250) # Slightly faster duration
+        self.anim_geometry.setDuration(250)
         self.anim_geometry.finished.connect(self.on_animation_finished)
 
-        # Timers & Inputs
         self.search_timer = QTimer(self)
         self.search_timer.setSingleShot(True)
         self.search_timer.setInterval(100)
@@ -157,16 +168,13 @@ class LauncherWindow(QWidget):
         self.setWindowFlags(Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.Tool)
         self.setAttribute(Qt.WA_TranslucentBackground)
         
-        # Initial Geometry
         self.compact_h_total = self.VISUAL_COMPACT_HEIGHT + (self.WINDOW_MARGIN * 2)
         total_w = self.VISUAL_WIDTH + (self.WINDOW_MARGIN * 2)
         self.resize(total_w, self.compact_h_total)
         
-        # Layout
         self.main_layout = QVBoxLayout(self)
         self.main_layout.setContentsMargins(self.WINDOW_MARGIN, self.WINDOW_MARGIN, self.WINDOW_MARGIN, self.WINDOW_MARGIN)
         
-        # Visual Container
         self.container = QFrame()
         self.container.setObjectName("Container")
         self.inner_layout = QVBoxLayout(self.container)
@@ -200,7 +208,8 @@ class LauncherWindow(QWidget):
         self.result_list = QListWidget()
         self.result_list.setItemDelegate(ResultDelegate())
         self.result_list.setVerticalScrollMode(QAbstractItemView.ScrollPerPixel)
-        self.result_list.setUniformItemSizes(True)
+        # FIX: Must be False to allow items to have different heights
+        self.result_list.setUniformItemSizes(False)
         self.result_list.setFocusPolicy(Qt.NoFocus)
         self.result_list.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.result_list.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Ignored)
@@ -223,7 +232,6 @@ class LauncherWindow(QWidget):
         
         self.main_layout.addWidget(self.container)
         
-        # Shadow (Save reference to self.shadow)
         self.shadow = QGraphicsDropShadowEffect(self)
         self.shadow.setBlurRadius(30)
         self.shadow.setColor(QColor(0, 0, 0, 150))
@@ -249,34 +257,25 @@ class LauncherWindow(QWidget):
                 color: {THEME['surface']}; background-color: {THEME['surface']};
                 border: none; min-height: 1px; max-height: 1px;
             }}
-            QListWidget {{ background: transparent; border: none; padding: 5px 0; }}
-                        /* Custom Scrollbar */
+            QListWidget {{ background: transparent; border: none; padding: 5px 0; outline: 0; }}
+            QListWidget::item {{ border: none; padding: 0px; }}
+            QListWidget::item:selected {{ background: transparent; }}
+            
             QScrollBar:vertical {{
-                border: none;
-                background: transparent;
-                width: 8px;
-                margin: 0px 0px 0px 0px;
+                border: none; background: transparent; width: 8px; margin: 0px;
             }}
             QScrollBar::handle:vertical {{
-                background: {THEME['surface']};
-                min-height: 30px;
-                border-radius: 4px;
+                background: {THEME['surface']}; min-height: 30px; border-radius: 4px;
             }}
-            QScrollBar::handle:vertical:hover {{
-                background: {THEME['border']};
-            }}
-            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{
-                height: 0px;
-            }}
-            QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {{
-                background: none;
-            }}
+            QScrollBar::handle:vertical:hover {{ background: {THEME['border']}; }}
+            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{ height: 0px; }}
+            QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {{ background: none; }}
+            
             QFrame#Footer {{ background: transparent; border-top: 1px solid transparent; }}
             QLabel#FooterLabel {{ color: {THEME['subtext']}; font-size: 12px; font-weight: 600; }}
         """
         self.setStyleSheet(css)
         
-        # Snap geometry back to compact
         geo = self.geometry()
         geo.setHeight(self.compact_h_total)
         self.setGeometry(geo)
@@ -285,7 +284,7 @@ class LauncherWindow(QWidget):
         if not text.strip():
             self.footer_lbl.setText("Start typing...")
             self.result_list.clear()
-            self.animate_resize(0) 
+            self.animate_resize(0, 0) 
             self.search_timer.stop()
         else:
             self.search_timer.start()
@@ -308,30 +307,47 @@ class LauncherWindow(QWidget):
 
         self.result_list.clear()
         count = len(results)
+        total_content_height = 0
         
         if count == 0:
             self.footer_lbl.setText("No results found.")
-            self.animate_resize(0)
+            self.animate_resize(0, 0)
         else:
-            for item in results:
+            for item_data in results:
                 l_item = QListWidgetItem()
-                l_item.setData(Qt.UserRole, item)
+                l_item.setData(Qt.UserRole, item_data)
+                
+                # Check custom height logic
+                height = item_data.height
+                total_content_height += height
+                
+                # FIX: Set the SizeHint on the item so the Delegate can find it
+                l_item.setSizeHint(QSize(self.result_list.width(), height))
                 self.result_list.addItem(l_item)
+                
+                # If widget factory exists, create and set
+                if item_data.widget_factory:
+                    widget = item_data.widget_factory()
+                    self.result_list.setItemWidget(l_item, widget)
             
             self.result_list.setCurrentRow(0)
             self.update_footer()
-            self.animate_resize(count)
+            self.animate_resize(count, total_content_height)
 
-    def animate_resize(self, item_count):
+    def animate_resize(self, item_count, content_height):
         current_geo = self.geometry()
         
-        # Calculate Target Height
         if item_count == 0:
             visual_h = self.VISUAL_COMPACT_HEIGHT
             self.target_height = self.compact_h_total
         else:
-            list_h = min(item_count * self.ROW_HEIGHT, self.MAX_VISIBLE_ITEMS * self.ROW_HEIGHT)
+            # Determine maximum visual list height
+            max_list_h = self.MAX_VISIBLE_ITEMS * self.ROW_HEIGHT
+            
+            # Use actual content height, but clamp to max
+            list_h = min(content_height, max_list_h)
             list_h += 10 # padding
+            
             visual_h = self.VISUAL_COMPACT_HEIGHT + list_h
             
             self.line.show()
@@ -344,11 +360,8 @@ class LauncherWindow(QWidget):
             if item_count == 0: self.on_animation_finished()
             return
 
-        # --- KEY FIX: DISABLE SHADOW FOR PERFORMANCE ---
         self.shadow.setEnabled(False)
 
-        # Calculate new Y position
-        # Move TOP up by 15%, let BOTTOM expand 85%
         height_diff = target_total_h - current_geo.height()
         bias = 0.15 
         new_y = current_geo.y() - int(height_diff * bias)
@@ -361,9 +374,7 @@ class LauncherWindow(QWidget):
         self.anim_geometry.start()
 
     def on_animation_finished(self):
-        # --- RE-ENABLE SHADOW ---
         self.shadow.setEnabled(True)
-
         if self.geometry().height() <= self.compact_h_total + 2:
             self.line.hide()
             self.result_list.hide()
@@ -393,12 +404,6 @@ class LauncherWindow(QWidget):
                 return True
             elif event.key() == Qt.Key_Up:
                 self.nav(-1)
-                return True
-            elif event.key() == Qt.Key_PageDown:
-                self.nav(5)
-                return True
-            elif event.key() == Qt.Key_PageUp:
-                self.nav(-5)
                 return True
             elif event.key() == Qt.Key_Escape:
                 self.core.hide_window()
