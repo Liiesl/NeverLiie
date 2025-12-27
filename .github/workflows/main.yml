@@ -28,6 +28,9 @@ jobs:
           script-name: main.py
           mode: standalone
           include-data-dir: 'extensions/=extensions/'
+          include-package: |
+            markdown
+            sqlite3
           mingw64: true
           enable-plugins: pyside6
           company-name: "Liiesl"
