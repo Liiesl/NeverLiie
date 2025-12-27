@@ -1,4 +1,4 @@
-# extensions/core_everything/__init__.py
+# extensions/file_search/__init__.py
 import os
 import sys
 import ctypes

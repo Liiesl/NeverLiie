@@ -1,4 +1,4 @@
-# extensions/demo_calculator/__init__.py
+# extensions/calculator/__init__.py
 import math
 from PySide6.QtWidgets import QWidget, QLabel, QHBoxLayout, QVBoxLayout, QFrame
 from PySide6.QtCore import Qt
