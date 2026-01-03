@@ -108,8 +108,8 @@ class App:
         self.window.raise_()
         self.window.activateWindow()
         force_focus(self.hwnd)
-        self.window.search_input.setFocus()
-        self.window.search_input.selectAll() 
+        self.window.search_bar.search_input.setFocus()
+        self.window.search_bar.search_input.selectAll() 
         self.watchdog.start()
 
     def hide_window(self):

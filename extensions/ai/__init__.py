@@ -151,11 +151,11 @@ class ChatView(QWidget):
 
     def handle_enter(self):
         if self.is_loading: return
-        text = self.parent_window.search_input.text().strip()
+        text = self.parent_window.search_bar.search_input.text().strip()
         if not text: return
 
         self.add_bubble(text, is_user=True)
-        self.parent_window.search_input.clear()
+        self.parent_window.search_bar.search_input.clear()
         
         self.add_bubble("Thinking...", is_user=False)
         self.loading_bubble = self.content_layout.itemAt(self.content_layout.count() - 2).widget()
