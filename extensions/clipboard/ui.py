@@ -1,12 +1,12 @@
 # extensions/clipboard/ui.py
 from PySide6.QtWidgets import (QWidget, QHBoxLayout, QVBoxLayout, QListWidget, 
-                               QListWidgetItem, QLabel, QTextEdit, QFrame, 
-                               QLabel)
+                               QListWidgetItem, QLabel, QTextEdit, QFrame)
 from PySide6.QtCore import Qt, QSize, QDateTime
-from PySide6.QtGui import QPixmap
+from PySide6.QtGui import QPixmap, QColor, QBrush, QFont
 from .monitor import ClipboardMonitor
 from .input_sim import send_ctrl_v
 import os, json
+from datetime import datetime, timedelta # <--- ADDED
 
 # Reuse Main Theme
 THEME = {
@@ -15,7 +15,9 @@ THEME = {
     "text": "#cdd6f4",
     "subtext": "#a6adc8",
     "accent": "#89b4fa",
-    "border": "#45475a"
+    "border": "#45475a",
+    "header_bg": "#2a2a2c", # New color for headers
+    "header_text": "#fab387" # Peach color for headers
 }
 
 # Supported extensions for text preview
@@ -106,29 +108,84 @@ class ClipboardView(QWidget):
     def filter_items(self, query):
         self.refresh_list(query)
 
+    # --- NEW: Date Category Logic ---
+    def get_time_category(self, timestamp_float):
+        ts = datetime.fromtimestamp(timestamp_float)
+        now = datetime.now()
+        
+        # Reset to midnight for day comparison
+        ts_date = ts.date()
+        today = now.date()
+        
+        delta_days = (today - ts_date).days
+
+        if delta_days == 0:
+            return "Today"
+        elif delta_days < 7:
+            return "Last 7 Days"
+        elif delta_days < 30:
+            return "Last 30 Days"
+        else:
+            # Returns "September 2023", etc.
+            return ts.strftime("%B %Y")
+
     def refresh_list(self, query):
         self.list_widget.clear()
-        results = self.monitor.get_history(query, limit=50)
+        
+        # Increased limit to ensure we actually see older history groupings
+        results = self.monitor.get_history(query, limit=100)
+        
+        current_category = None
         
         for row in results:
+            # 1. Determine Category
+            ts = row['timestamp']
+            category = self.get_time_category(ts)
+            
+            # 2. Insert Header if Category Changed
+            if category != current_category:
+                header_item = QListWidgetItem(category.upper())
+                # Make header look distinct
+                header_item.setBackground(QColor(THEME['header_bg']))
+                header_item.setForeground(QBrush(QColor(THEME['header_text'])))
+                
+                # Style font for header
+                font = QFont()
+                font.setBold(True)
+                font.setPointSize(9)
+                header_item.setFont(font)
+                
+                # Make header smaller height
+                header_item.setSizeHint(QSize(0, 30))
+                
+                # Make header non-selectable but enabled (so it displays)
+                header_item.setFlags(Qt.ItemIsEnabled) 
+                
+                self.list_widget.addItem(header_item)
+                current_category = category
+
+            # 3. Add actual item
             item_type = row['type']
             content = row['content_text']
             
             display_text = ""
             if item_type == 'files':
-                # content_text contains "File: filename.txt"
                 display_text = f"📁 {content}"
             elif item_type == 'image':
                 display_text = "📸 Image Capture"
             else:
+                # Remove newlines for list view
                 display_text = " ".join(content.split())[:35]
             
             w_item = QListWidgetItem(display_text)
             w_item.setData(Qt.UserRole, row)
             self.list_widget.addItem(w_item)
             
-        if self.list_widget.count() > 0:
-            self.list_widget.setCurrentRow(0)
+        # Select first actual item (index 1 if there is a header at 0)
+        if self.list_widget.count() > 1:
+            self.list_widget.setCurrentRow(1)
+        elif self.list_widget.count() > 0:
+             self.list_widget.setCurrentRow(0)
 
     def _show_image(self, path):
         """Helper to display image given a path."""
@@ -146,8 +203,13 @@ class ClipboardView(QWidget):
 
     def on_selection_change(self, current, previous):
         if not current: return
-        data = current.data(Qt.UserRole)
         
+        # Check if it's a header (headers don't have UserRole data)
+        data = current.data(Qt.UserRole)
+        if data is None:
+            # If user somehow clicked a header, do nothing or move selection
+            return 
+            
         ts = QDateTime.fromSecsSinceEpoch(int(data['timestamp']))
         self.time_lbl.setText(ts.toString("MMM d, h:mm ap"))
         self.type_badge.setText(data['type'].upper())
@@ -206,14 +268,29 @@ class ClipboardView(QWidget):
             self.text_view.setText(data['content_text'])
 
     def handle_key(self, event):
+        # Override to skip headers when using arrow keys
+        current_row = self.list_widget.currentRow()
+        count = self.list_widget.count()
+        
         if event.key() == Qt.Key_Down:
-            curr = self.list_widget.currentRow()
-            if curr < self.list_widget.count() - 1:
-                self.list_widget.setCurrentRow(curr + 1)
+            next_row = current_row + 1
+            # Skip items that don't have UserRole data (Headers)
+            while next_row < count:
+                item = self.list_widget.item(next_row)
+                if item.data(Qt.UserRole) is not None:
+                    self.list_widget.setCurrentRow(next_row)
+                    break
+                next_row += 1
+                
         elif event.key() == Qt.Key_Up:
-            curr = self.list_widget.currentRow()
-            if curr > 0:
-                self.list_widget.setCurrentRow(curr - 1)
+            prev_row = current_row - 1
+            while prev_row >= 0:
+                item = self.list_widget.item(prev_row)
+                if item.data(Qt.UserRole) is not None:
+                    self.list_widget.setCurrentRow(prev_row)
+                    break
+                prev_row -= 1
+                
         elif event.key() in (Qt.Key_Return, Qt.Key_Enter):
             self.handle_enter()
 
@@ -221,6 +298,7 @@ class ClipboardView(QWidget):
         item = self.list_widget.currentItem()
         if not item: return
         data = item.data(Qt.UserRole)
+        if not data: return # It's a header
         
         self.context.hide_window()
         import time
