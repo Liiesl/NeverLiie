@@ -14,6 +14,14 @@ class PluginManager:
         self.core = core_app
         self.settings = core_app.settings
         
+        # Determine Base AppData Path
+        if sys.platform == "win32":
+            base_path = os.getenv("APPDATA")
+        else:
+            base_path = os.path.expanduser("~/.local/share")
+            
+        self.app_data_root = os.path.join(base_path, "NeverLiie", "extensions")
+        
         # Thread pool
         self.executor = concurrent.futures.ThreadPoolExecutor(max_workers=10, thread_name_prefix="ExtWorker")
         
@@ -48,7 +56,19 @@ class PluginManager:
                 if isinstance(attr, type) and issubclass(attr, Extension) and attr is not Extension:
                     if attr not in loaded_classes:
                         print(f"[Core] Loading Extension: {folder_name}")
+                        
+                        # --- START CHANGE: Inject Data Path ---
                         context = ExtensionContext(self.core, ext_id=folder_name)
+                        
+                        # Define centralized storage path: %APPDATA%/PyLauncher/extensions/<ext_id>/
+                        ext_data_path = os.path.join(self.app_data_root, folder_name)
+                        if not os.path.exists(ext_data_path):
+                            os.makedirs(ext_data_path)
+                            
+                        # Inject property into context
+                        context.data_path = ext_data_path
+                        # --- END CHANGE ---
+
                         instance = attr(context)
                         self.extensions.append(instance)
                         loaded_classes.add(attr)

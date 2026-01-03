@@ -1,20 +1,32 @@
 # extensions/clipboard/__init__.py
 import time
+import os
 from api.extension import Extension
 from api.types import ResultItem, Action
 from .monitor import ClipboardMonitor
 from .input_sim import send_ctrl_v
 
-# Global instance to keep history alive between queries
+# Global instance
 _monitor = None
 from .ui import ClipboardView
 
 class ClipboardExtension(Extension):
-    def __init__(self, core_app):
-        super().__init__(core_app)
+    def __init__(self, context):
+        super().__init__(context)
         global _monitor
+        
+        # --- START CHANGE: Use centralized path ---
         if _monitor is None:
-            _monitor = ClipboardMonitor()
+            # context.data_path is now injected by PluginManager
+            # e.g., C:\Users\User\AppData\Roaming\PyLauncher\extensions\clipboard
+            
+            db_path = os.path.join(self.context.data_path, 'clipboard.db')
+            media_path = os.path.join(self.context.data_path, 'media')
+            
+            print(f"[Clipboard] Storing data in: {self.context.data_path}")
+            _monitor = ClipboardMonitor(db_path=db_path, media_dir=media_path)
+        # --- END CHANGE ---
+            
         self.monitor = _monitor
 
     def on_input(self, text):
@@ -29,16 +41,14 @@ class ClipboardExtension(Extension):
             return []
 
         items = []
-        history = self.monitor.get_history()
-        
-        # Clean query if it starts with "cb "
+        # Pass query to monitor if you want DB level filtering
         search_term = query[3:].strip() if query.startswith("cb ") else ""
+        history = self.monitor.get_history(search_term)
         
         for idx, row in enumerate(history):
-            # Extract content text from the dictionary row
             content = row.get('content_text') or ""
             
-            # Search Filter
+            # Simple fallback filtering if DB didn't do it
             if search_term and search_term not in content.lower():
                 continue
 
