@@ -16,7 +16,7 @@ from .win32_utils import (
     force_focus, get_foreground_window, user32
 )
 
-# --- HELPER CLASSES (Moved to Global Scope) ---
+# --- HELPER CLASSES (Global) ---
 class SettingsAction:
     def __init__(self, handler):
         self.handler = handler
@@ -33,7 +33,6 @@ class SettingsItem:
         # Duck-typing score for sorting
         self.score = 100 
 
-# ... (GlobalShortcutFilter remains the same) ...
 class GlobalShortcutFilter(QAbstractNativeEventFilter):
     def __init__(self, callback):
         super().__init__()
@@ -42,7 +41,7 @@ class GlobalShortcutFilter(QAbstractNativeEventFilter):
     def nativeEventFilter(self, eventType, message):
         if sys.platform == "win32":
             try:
-                event_type_str = eventType if isinstance(eventType, str) else (eventType.decode('utf-8') if isinstance(eventType, bytes) else str(eventType))
+                event_type_str = eventType if isinstance(eventType, str) else str(eventType)
             except:
                 event_type_str = str(eventType)
             
@@ -63,16 +62,16 @@ class App:
         self.qapp.setQuitOnLastWindowClosed(False)
         
         self.settings = SettingsManager()
-
         self.icon = create_app_icon()
         self.qapp.setWindowIcon(self.icon)
+        
+        self.pm = PluginManager(self)
+        self.load_plugins()
+        
         self.active_extension = None
         self.window = LauncherWindow(self)
         self.window.center_on_screen = self.center_window
         
-        self.pm = PluginManager(self)
-        self.load_plugins()
-
         self.settings_window = SettingsWindow(self)
 
         self.hotkey_id = 1
@@ -121,30 +120,30 @@ class App:
         if not self.window.isVisible(): 
             self.watchdog.stop()
             return
-        
         fg_hwnd = get_foreground_window()
-        
-        # Logic: If focus is lost AND the new focus is NOT the settings window
-        # We want the launcher to stay open if the user clicks the Settings window?
-        # Usually, if you click Settings, the Launcher should probably hide or stay.
-        # But for now, let's keep the standard logic: close if not launcher.
-        
         if fg_hwnd != self.hwnd:
             self.hide_window()
 
-    def query(self, text):
+    def query(self, text, callback):
+        """
+        Initiates an async query.
+        callback: function(results: list, query_id: int)
+        """
         # 1. Scoped Mode
         if self.active_extension:
             ext = next((e for e in self.pm.extensions if e.id == self.active_extension), None)
             if ext:
-                return ext.on_input(text) # Only query specific extension
-            return []
+                # Scoped search is usually fast enough to stay sync, 
+                # but for consistency we could wrap it. 
+                # For now, let's just return it immediately via callback.
+                results = ext.on_input(text)
+                # We need a dummy ID for scoped mode or handle it differently
+                # Passing 0 as ID since scoped mode is synchronous here
+                callback(results, -1) 
+            return
 
-        # 2. Root Mode
-        # Query all plugins
-        results = self.pm.query_all(text)
-        
-        # Inject "Open Extension" commands if text matches extension name
+        # 2. Root Mode - Inject "Open Extension" commands immediately
+        static_results = []
         for ext in self.pm.extensions:
             if ext.id.lower().startswith(text.lower()) or text.lower() in ext.id.lower():
                 from api.types import ResultItem, Action
@@ -152,23 +151,40 @@ class App:
                     id=f"ext_open_{ext.id}",
                     name=ext.id.replace("_", " ").title(),
                     description="Open Extension",
-                    score=200, # Show at top
+                    score=200, 
                     action=Action(
                         name="Open",
                         handler=lambda e=ext: self.enter_extension_mode(e),
                         close_on_action=False
                     )
                 )
-                results.insert(0, item)
-                
-        return results
+                static_results.append(item)
+        
+        # Fire initial static results immediately
+        if static_results:
+            # Sort just in case
+            static_results.sort(key=lambda x: x.score, reverse=True)
+            # We need to get the "future" ID that search_async will use.
+            # But search_async manages IDs. 
+            # To simplify, we let search_async handle everything, 
+            # OR we pass static results to search_async to prepend?
+            # Let's just fire them now. If async results come later, they will overwrite/merge.
+            pass 
+
+        # 3. Call Async Manager
+        # We wrap the callback to merge static results if needed
+        def result_wrapper(async_results, qid):
+            # Merge static results + async results
+            # (In a real app, you might want to deduplicate)
+            combined = static_results + async_results
+            combined.sort(key=lambda x: x.score, reverse=True)
+            callback(combined, qid)
+
+        self.pm.search_async(text, result_wrapper)
 
     def enter_extension_mode(self, extension):
         self.active_extension = extension.id
-        
-        # Check if extension has custom view
         custom_view = extension.get_extension_view(self.window)
-        
         self.window.set_mode_extension(extension.id.replace("_", " ").title(), custom_view)
 
     def exit_extension_mode(self):
@@ -184,13 +200,10 @@ class App:
     def setup_tray(self):
         self.tray = QSystemTrayIcon(self.icon, self.qapp)
         menu = QMenu()
-        
         action_settings = QAction("Settings", self.qapp)
         action_settings.triggered.connect(self.show_settings)
         menu.addAction(action_settings)
-        
         menu.addSeparator()
-        
         menu.addAction(QAction("Show Launcher", self.qapp, triggered=self.show_window))
         menu.addAction(QAction("Quit", self.qapp, triggered=self.quit_app))
         self.tray.setContextMenu(menu)
@@ -203,6 +216,7 @@ class App:
 
     def quit_app(self):
         user32.UnregisterHotKey(self.hwnd, self.hotkey_id)
+        self.pm.shutdown()
         self.qapp.quit()
 
     def run(self):

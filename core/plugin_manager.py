@@ -3,7 +3,8 @@ import os
 import importlib.util
 import sys
 import concurrent.futures
-import time  # <--- Added time
+import time
+import threading
 from api.extension import Extension
 from api.context import ExtensionContext
 
@@ -15,6 +16,11 @@ class PluginManager:
         
         # Thread pool
         self.executor = concurrent.futures.ThreadPoolExecutor(max_workers=10, thread_name_prefix="ExtWorker")
+        
+        # Async state management
+        self._query_id = 0
+        self._search_lock = threading.Lock()
+        self._active_futures = []
 
     def load_extensions(self, extensions_dir):
         if not os.path.exists(extensions_dir):
@@ -53,60 +59,82 @@ class PluginManager:
     def _safe_query(self, ext, text):
         """
         Runs inside the thread. 
-        Measures execution time.
         """
         start_time = time.perf_counter()
         results = []
-        
         try:
-            results = ext.on_input(text)
+            results = ext.on_input(text) or [] # Ensure list
         except Exception as e:
             print(f"[Error] Extension '{ext.id}' crashed: {e}")
             results = []
         finally:
             end_time = time.perf_counter()
             elapsed_ms = (end_time - start_time) * 1000
-            
-            # Print execution time for EVERY extension
-            print(f"[{ext.id}] {elapsed_ms:.2f} ms")
-            
-            # Highlight extremely slow ones (e.g., > 500ms)
-            if elapsed_ms > 500:
-                print(f"⚠️ SLOW: {ext.id} took {elapsed_ms:.2f} ms")
+            # Optional: Log slow plugins
+            if elapsed_ms > 200:
+                print(f"[{ext.id}] Slow: {elapsed_ms:.2f} ms")
 
         return results
 
-    def query_all(self, text):
-        results = []
-        futures = {}
+    def cancel_previous_queries(self):
+        """
+        Increment the query ID. Any thread running a task for an 
+        older ID will effectively have its results ignored.
+        """
+        with self._search_lock:
+            self._query_id += 1
+            # We can't easily kill running threads in Python, 
+            # but we can ignore their output.
+            
+    def search_async(self, text, callback_fn):
+        """
+        text: The search string
+        callback_fn: function(results: list, query_id: int)
+        """
+        
+        # 1. Invalidate previous searches
+        self.cancel_previous_queries()
+        
+        current_qid = self._query_id
+        
+        # 2. Prepare result bucket
+        current_results = []
+        
+        # 3. Define the completion handler (runs on worker thread)
+        def on_task_done(future):
+            # If query ID has changed, user typed something new. Abort.
+            if self._query_id != current_qid:
+                return
 
-        # 1. Submit tasks
+            try:
+                new_items = future.result()
+                if not new_items: 
+                    return
+                
+                # Critical Section: Update the master list
+                with self._search_lock:
+                    # Double check ID inside lock just to be safe
+                    if self._query_id != current_qid:
+                        return
+                        
+                    current_results.extend(new_items)
+                    # Sort immediately so the UI gets a ranked list
+                    current_results.sort(key=lambda x: x.score, reverse=True)
+                    
+                    # Create a copy to pass to UI (prevent modification issues)
+                    results_snapshot = list(current_results)
+                
+                # Send back to UI
+                callback_fn(results_snapshot, current_qid)
+                
+            except Exception as e:
+                print(f"Task error: {e}")
+
+        # 4. Submit tasks
         for ext in self.extensions:
             if self.settings.is_extension_enabled(ext.id):
                 future = self.executor.submit(self._safe_query, ext, text)
-                futures[future] = ext.id
+                future.add_done_callback(on_task_done)
 
-        # 2. Gather results with timeout
-        try:
-            for future in concurrent.futures.as_completed(futures, timeout=2.0):
-                try:
-                    items = future.result()
-                    if items:
-                        results.extend(items)
-                except Exception as e:
-                    print(f"[Core] Thread error: {e}")
-
-        except concurrent.futures.TimeoutError:
-            # 3. Identify who caused the timeout
-            slow_plugins = []
-            for f, ext_id in futures.items():
-                if not f.done():
-                    slow_plugins.append(ext_id)
-            
-            print(f"❌ TIMEOUT caused by: {', '.join(slow_plugins)}")
-
-        results.sort(key=lambda x: x.score, reverse=True)
-        return results
-        
     def shutdown(self):
         self.executor.shutdown(wait=False)

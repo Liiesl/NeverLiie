@@ -6,7 +6,7 @@ from PySide6.QtWidgets import (QWidget, QVBoxLayout, QLineEdit, QListWidget,
                                QSizePolicy, QStackedWidget)
 from PySide6.QtCore import (Qt, QSize, QRect, QTimer, QEvent, QFileInfo, 
                             QThread, Signal, Slot, QPropertyAnimation, 
-                            QEasingCurve)
+                            QEasingCurve, QObject)
 from PySide6.QtGui import QColor, QFont, QPainter, QPen, QIcon, QPixmap
 
 # --- THEME CONFIGURATION ---
@@ -38,19 +38,10 @@ def create_app_icon():
     painter.end()
     return QIcon(pixmap)
 
-# --- WORKER THREAD ---
-class QueryThread(QThread):
-    results_ready = Signal(list, str)
-    def __init__(self, core, text):
-        super().__init__()
-        self.core = core
-        self.text = text
-    def run(self):
-        try:
-            results = self.core.query(self.text)
-            self.results_ready.emit(results, self.text)
-        except:
-            self.results_ready.emit([], self.text)
+# --- RESULT RECEIVER (Async Bridge) ---
+class ResultReceiver(QObject):
+    # Signal arguments: (results list, query_id, original_text)
+    results_ready = Signal(list, int, str)
 
 # --- DELEGATE ---
 class ResultDelegate(QStyledItemDelegate):
@@ -60,7 +51,6 @@ class ResultDelegate(QStyledItemDelegate):
         self.h_margin = 12
         self.v_margin = 6
         self.row_height = 64
-        # Cache icons to prevent IO/RAM spikes during repaint
         self._icon_cache = {}
 
     def sizeHint(self, option, index):
@@ -92,7 +82,6 @@ class ResultDelegate(QStyledItemDelegate):
             painter.setBrush(QColor(THEME["accent"]))
             painter.drawRoundedRect(pill_rect, 2, 2)
 
-        # Custom Widget Support (Inline)
         if item_data.widget_factory:
             painter.restore()
             return
@@ -133,7 +122,7 @@ class ResultDelegate(QStyledItemDelegate):
 
 # --- WINDOW ---
 class LauncherWindow(QWidget):
-    VISUAL_WIDTH = 800 # Wider for split view
+    VISUAL_WIDTH = 800
     VISUAL_COMPACT_HEIGHT = 80 
     ROW_HEIGHT = 64
     MAX_VISIBLE_ITEMS = 6
@@ -142,13 +131,16 @@ class LauncherWindow(QWidget):
     def __init__(self, core_app):
         super().__init__()
         self.core = core_app
-        self.query_thread = None
         
-        # [FIX] Stable Anchor Variable
-        # Stores the theoretical Y position of the window when in Compact Mode.
-        # This prevents calculation drift during rapid animations.
+        # Bridge for Async Signals
+        self.receiver = ResultReceiver()
+        self.receiver.results_ready.connect(self.handle_results)
+        
+        # State tracking for async handling
+        self.last_query_text = ""
+        self.current_query_id = -1
+        
         self.base_y_anchor = None
-        
         self.setup_ui()
         self.setup_styling()
         
@@ -159,7 +151,7 @@ class LauncherWindow(QWidget):
 
         self.search_timer = QTimer(self)
         self.search_timer.setSingleShot(True)
-        self.search_timer.setInterval(300)
+        self.search_timer.setInterval(150) # Reduced for snappier feel
         self.search_timer.timeout.connect(self.perform_search)
         
         self.search_input.textEdited.connect(self.on_text_edited)
@@ -187,7 +179,7 @@ class LauncherWindow(QWidget):
         self.inner_layout.setContentsMargins(0, 0, 0, 0)
         self.inner_layout.setSpacing(0)
 
-        # 1. Header (Search Bar + Nav)
+        # Header
         self.search_frame = QFrame()
         self.search_frame.setObjectName("SearchFrame")
         self.search_frame.setFixedHeight(60)
@@ -216,13 +208,13 @@ class LauncherWindow(QWidget):
         search_layout.addWidget(self.search_input)
         search_layout.addWidget(self.context_lbl)
 
-        # 2. Separator
+        # Separator
         self.line = QFrame()
         self.line.setFrameShape(QFrame.HLine)
         self.line.setObjectName("Separator")
         self.line.hide()
 
-        # 3. Content Stack (Page 0: List, Page 1: Custom)
+        # Content Stack
         self.content_stack = QStackedWidget()
         
         self.result_list = QListWidget()
@@ -236,7 +228,7 @@ class LauncherWindow(QWidget):
         self.content_stack.addWidget(self.result_list)
         self.content_stack.hide()
 
-        # 4. Footer
+        # Footer
         self.footer = QFrame()
         self.footer.setObjectName("Footer")
         self.footer.setFixedHeight(40)
@@ -315,14 +307,9 @@ class LauncherWindow(QWidget):
         self.setGeometry(geo)
 
     def showEvent(self, event):
-        # [FIX] Capture the anchor position when window appears.
-        # We calculate 'base_y_anchor' as the Y position if the window were Compact.
-        # This gives us a mathematically stable reference point for all animations.
         current_y = self.y()
         current_h = self.height()
         expansion_diff = current_h - self.compact_h_total
-        
-        # Reverse the expansion bias (15% up) to find the stable compact Y
         self.base_y_anchor = current_y + (expansion_diff * 0.15)
         super().showEvent(event)
 
@@ -330,7 +317,6 @@ class LauncherWindow(QWidget):
         self.core.exit_extension_mode()
 
     # --- MODE SWITCHING ---
-
     def set_mode_root(self):
         self.back_btn.hide()
         self.context_lbl.hide()
@@ -360,7 +346,6 @@ class LauncherWindow(QWidget):
         if custom_widget:
             self.content_stack.addWidget(custom_widget)
             self.content_stack.setCurrentIndex(1)
-            
             self.line.show()
             self.content_stack.show()
             self.footer.setStyleSheet(f"QFrame#Footer {{ border-top: 1px solid {THEME['surface']}; }}")
@@ -402,27 +387,42 @@ class LauncherWindow(QWidget):
             return
 
         text = self.search_input.text()
-        
-        if self.query_thread and self.query_thread.isRunning():
-            self.query_thread.quit()
-            self.query_thread.wait()
-        
+        self.last_query_text = text
+        self.result_list.clear()
         self.footer_lbl.setText("Searching...")
-        self.query_thread = QueryThread(self.core, text)
-        self.query_thread.results_ready.connect(self.handle_results)
-        self.query_thread.start()
 
-    @Slot(list, str)
-    def handle_results(self, results, query_text):
+        # ASYNC SEARCH CALL
+        # We pass a lambda that invokes the ResultReceiver's signal.
+        # The worker thread calls this lambda, which emits the signal.
+        # Note: We need to capture the current text to validate results.
+        
+        def bridge_callback(results, qid):
+            self.receiver.results_ready.emit(results, qid, text)
+            
+        self.core.query(text, bridge_callback)
+
+    @Slot(list, int, str)
+    def handle_results(self, results, qid, query_text):
+        """
+        Called progressively as results arrive from background threads.
+        """
         if self.content_stack.currentIndex() != 0: return
+        
+        # Validation: Ensure result matches what is currently in the search box
         if query_text != self.search_input.text(): return
-
+        
+        # Save selection state (attempt to keep logic)
+        current_row = self.result_list.currentRow()
+        
         self.result_list.clear()
         count = len(results)
         total_content_height = 0
         
         if count == 0:
             self.footer_lbl.setText("No results found.")
+            # Only collapse if we are sure everything finished, 
+            # but for streaming, we might just stay empty until more arrive.
+            # For now, let's just resize.
             self.animate_resize(0, 0)
         else:
             for item_data in results:
@@ -439,7 +439,12 @@ class LauncherWindow(QWidget):
                     widget = item_data.widget_factory()
                     self.result_list.setItemWidget(l_item, widget)
             
-            self.result_list.setCurrentRow(0)
+            # Restore selection or default to 0
+            if current_row >= 0 and current_row < count:
+                self.result_list.setCurrentRow(current_row)
+            else:
+                self.result_list.setCurrentRow(0)
+
             self.update_footer()
             self.animate_resize(count, total_content_height)
 
@@ -473,11 +478,6 @@ class LauncherWindow(QWidget):
 
         self.shadow.setEnabled(False)
         self.result_list.setUpdatesEnabled(False)
-        
-        # [FIX] MATH STABILITY
-        # Instead of calculating new_y based on the drifting 'current.y()',
-        # we calculate it based on the stable 'self.base_y_anchor'.
-        # Target Y = Anchor - (Expansion Amount * Bias)
         
         if self.base_y_anchor is None:
             self.base_y_anchor = current.y()
