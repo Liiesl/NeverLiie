@@ -4,12 +4,12 @@ from PySide6.QtCore import Qt, Signal, QEvent
 from ..theme import THEME
 
 class SearchBar(QFrame):
-    # Signals to communicate with the main window
     text_changed = Signal(str)
     return_pressed = Signal()
     back_clicked = Signal()
-    nav_requested = Signal(int) # -1 for up, 1 for down
+    nav_requested = Signal(int)
     escape_pressed = Signal()
+    command_menu_requested = Signal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -107,5 +107,8 @@ class SearchBar(QFrame):
                 return True
             elif event.key() == Qt.Key_Escape:
                 self.escape_pressed.emit()
+                return True
+            elif event.key() == Qt.Key_K and event.modifiers() == Qt.ControlModifier:
+                self.command_menu_requested.emit()
                 return True
         return super().eventFilter(obj, event)
