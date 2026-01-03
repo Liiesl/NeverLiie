@@ -1,12 +1,13 @@
+#extensions/system_apps/apps.py
 import os
 import json
+import subprocess
 from api.types import ResultItem, Action
 
 class AppIndexer:
     def __init__(self):
         self.apps = []
         self.alias_registry = {}
-        
         self.load_aliases()
         self.refresh_index()
 
@@ -14,7 +15,6 @@ class AppIndexer:
         try:
             current_dir = os.path.dirname(os.path.abspath(__file__))
             json_path = os.path.join(current_dir, "aliases.json")
-            
             if os.path.exists(json_path):
                 with open(json_path, 'r') as f:
                     data = json.load(f)
@@ -22,7 +22,6 @@ class AppIndexer:
                     if isinstance(category, dict):
                         for alias, target in category.items():
                             self.alias_registry[alias.lower()] = target.lower()
-                print(f"[System Apps] Loaded {len(self.alias_registry)} aliases.")
         except Exception as e:
             print(f"[System Apps] Error loading aliases: {e}")
 
@@ -36,7 +35,6 @@ class AppIndexer:
             os.path.join(os.environ["LOCALAPPDATA"], r"Programs"),
         ]
 
-        # Add PATH
         path_env = os.environ.get("PATH", "")
         for p in path_env.split(os.pathsep):
             if p and os.path.exists(p):
@@ -70,14 +68,11 @@ class AppIndexer:
                             "is_shortcut": ext.lower() == ".lnk"
                         })
                         found_paths.add(full_path)
-        
-        print(f"[System Apps] Indexed {len(self.apps)} applications.")
 
     def search(self, query):
         if not query: return []
         results = []
         
-        # Pre-calc aliases
         alias_targets = {}
         for alias_key, target_name in self.alias_registry.items():
             if alias_key.startswith(query):
@@ -88,15 +83,12 @@ class AppIndexer:
 
         for app in self.apps:
             score = 0
-            
-            # Direct Match
             if query in app['lower_name']:
                 score = 300 
                 if app['lower_name'].startswith(query): score += 100
                 if app['lower_name'] == query: score += 300
                 if app['is_shortcut']: score += 50
             
-            # Alias Match
             if score < 300:
                 for target_part, alias_score in alias_targets.items():
                     if target_part in app['lower_name']:
@@ -104,16 +96,22 @@ class AppIndexer:
                             score = alias_score
 
             if score > 0:
+                # Primary Action
+                launch_action = Action("Open Application", lambda p=app['path']: self._launch(p))
+                
+                # Context Actions
+                context_actions = [
+                    launch_action,
+                    Action("Show in Explorer", lambda p=app['path']: self._show_in_explorer(p))
+                ]
+
                 item = ResultItem(
                     id=app['path'],
                     name=app['name'],
                     description=app['path'],
                     icon_path=app['path'], 
-                    action=Action(
-                        name="Launch",
-                        handler=lambda p=app['path']: self._launch(p),
-                        close_on_action=True
-                    ),
+                    action=launch_action,
+                    context_actions=context_actions,
                     score=int(score)
                 )
                 results.append(item)
@@ -125,3 +123,10 @@ class AppIndexer:
             os.startfile(path)
         except Exception as e:
             print(f"[Error] Launch failed: {e}")
+
+    def _show_in_explorer(self, path):
+        try:
+            # Windows command to open explorer with file selected
+            subprocess.run(['explorer', '/select,', path])
+        except Exception as e:
+            print(f"[Error] Show in explorer failed: {e}")
