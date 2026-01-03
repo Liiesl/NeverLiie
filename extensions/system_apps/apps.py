@@ -1,7 +1,8 @@
-#extensions/system_apps/apps.py
+# extensions/system_apps/apps.py
 import os
 import json
 import subprocess
+import ctypes
 from api.types import ResultItem, Action
 
 class AppIndexer:
@@ -72,21 +73,27 @@ class AppIndexer:
     def search(self, query):
         if not query: return []
         results = []
+        query_lower = query.lower()
         
         alias_targets = {}
         for alias_key, target_name in self.alias_registry.items():
-            if alias_key.startswith(query):
-                ratio = len(query) / len(alias_key)
-                fuzzy_score = 110 + (ratio * 140)
-                if target_name not in alias_targets or fuzzy_score > alias_targets[target_name]:
-                    alias_targets[target_name] = fuzzy_score
+            ratio = len(query) / len(alias_key)
+            if alias_key.startswith(query_lower):
+                fuzzy_score = 250 + (ratio * 150)
+            elif query_lower in alias_key:
+                fuzzy_score = 200 + (ratio * 100)
+            else:
+                continue
+                
+            if target_name not in alias_targets or fuzzy_score > alias_targets[target_name]:
+                alias_targets[target_name] = fuzzy_score
 
         for app in self.apps:
             score = 0
-            if query in app['lower_name']:
+            if query_lower in app['lower_name']:
                 score = 300 
-                if app['lower_name'].startswith(query): score += 100
-                if app['lower_name'] == query: score += 300
+                if app['lower_name'].startswith(query_lower): score += 100
+                if app['lower_name'] == query_lower: score += 300
                 if app['is_shortcut']: score += 50
             
             if score < 300:
@@ -94,14 +101,20 @@ class AppIndexer:
                     if target_part in app['lower_name']:
                         if alias_score > score:
                             score = alias_score
+            
+            if query_lower == app['lower_name']:
+                score += 200
+            
+            for alias_key, target_name in self.alias_registry.items():
+                if alias_key == query_lower and target_name in app['lower_name']:
+                    score += 150
 
             if score > 0:
-                # Primary Action
                 launch_action = Action("Open Application", lambda p=app['path']: self._launch(p))
                 
-                # Context Actions
                 context_actions = [
                     launch_action,
+                    Action("Run as Administrator", lambda p=app['path']: self._launch_as_admin(p)),
                     Action("Show in Explorer", lambda p=app['path']: self._show_in_explorer(p))
                 ]
 
@@ -116,6 +129,7 @@ class AppIndexer:
                 )
                 results.append(item)
                 
+        results.sort(key=lambda x: x.score, reverse=True)
         return results
 
     def _launch(self, path):
@@ -123,6 +137,14 @@ class AppIndexer:
             os.startfile(path)
         except Exception as e:
             print(f"[Error] Launch failed: {e}")
+
+    def _launch_as_admin(self, path):
+        try:
+            # ShellExecuteW allows passing the "runas" verb which triggers the UAC prompt
+            # parameters: hwnd, verb, file, parameters, directory, show_cmd (1=SW_NORMAL)
+            ctypes.windll.shell32.ShellExecuteW(None, "runas", path, None, None, 1)
+        except Exception as e:
+            print(f"[Error] Launch as admin failed: {e}")
 
     def _show_in_explorer(self, path):
         try:
