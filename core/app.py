@@ -151,7 +151,7 @@ class App:
                     id=f"ext_open_{ext.id}",
                     name=ext.id.replace("_", " ").title(),
                     description="Open Extension",
-                    score=200, 
+                    score=2000, #always on top
                     action=Action(
                         name="Open",
                         handler=lambda e=ext: self.enter_extension_mode(e),
@@ -160,16 +160,13 @@ class App:
                 )
                 static_results.append(item)
         
-        # Fire initial static results immediately
+        # --- FIX START: Fire initial static results immediately ---
         if static_results:
-            # Sort just in case
             static_results.sort(key=lambda x: x.score, reverse=True)
-            # We need to get the "future" ID that search_async will use.
-            # But search_async manages IDs. 
-            # To simplify, we let search_async handle everything, 
-            # OR we pass static results to search_async to prepend?
-            # Let's just fire them now. If async results come later, they will overwrite/merge.
-            pass 
+            # Send immediately so they appear instantly (ID -1 indicates static/system)
+            callback(static_results, -1) 
+        # --- FIX END ---
+
 
         # 3. Call Async Manager
         # We wrap the callback to merge static results if needed
