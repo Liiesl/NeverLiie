@@ -10,6 +10,22 @@ from .components.result_list import ResultListContainer
 from .components.footer import Footer
 from .components.command_menu import CommandMenu
 
+import time
+
+class Profiler:
+    def __init__(self, name):
+        self.name = name
+        self.start = None
+
+    def __enter__(self):
+        self.start = time.perf_counter()
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        elapsed = (time.perf_counter() - self.start) * 1000  # Convert to ms
+        if elapsed > 1.0: # Only print if it takes noticeable time (>1ms)
+            print(f"[{self.name}] took {elapsed:.2f}ms")
+
 # --- RESULT RECEIVER (Async Bridge) ---
 class ResultReceiver(QObject):
     results_ready = Signal(list, int, str)
@@ -220,15 +236,22 @@ class LauncherWindow(QWidget):
         if self.result_container.currentIndex() != 0: return
         if query_text != self.search_bar.get_text(): return
         
-        count = len(results)
-        content_height = self.result_container.update_results(results)
-        
-        if count == 0:
-            self.footer.set_text("No results found.")
-            self.animate_resize(0, 0)
-        else:
-            self.update_footer_info(self.result_container.get_current_data())
-            self.animate_resize(count, content_height)
+        with Profiler("Total Handle Results"): # <--- ADD THIS
+            
+            count = len(results)
+            
+            # This is a likely suspect: creating widgets
+            with Profiler("Update List Items"): # <--- ADD THIS
+                content_height = self.result_container.update_results(results)
+            
+            if count == 0:
+                self.footer.set_text("No results found.")
+                self.animate_resize(0, 0)
+            else:
+                self.update_footer_info(self.result_container.get_current_data())
+                # This prepares the animation
+                with Profiler("Setup Animation"): # <--- ADD THIS
+                    self.animate_resize(count, content_height)
 
     def update_footer_info(self, item_data):
         if item_data and self.result_container.currentIndex() == 0:
