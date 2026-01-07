@@ -1,6 +1,5 @@
 # core/plugin_manager.py
 import os
-import importlib
 import importlib.util
 import sys
 import concurrent.futures
@@ -99,8 +98,9 @@ class PluginManager:
 
                     instance = attr(context)
                     # Remove existing instance from list
-                    self.extensions = [e for e in self.extensions if e.id != instance.id]
-                    self.extensions.append(instance)
+                    with self._search_lock:
+                        self.extensions = [e for e in self.extensions if e.id != instance.id]
+                        self.extensions.append(instance)
                     return True
                 except Exception as e:
                     print(f"[Error] Failed to instantiate {folder_name}: {e}")
@@ -206,6 +206,6 @@ class PluginManager:
             if hasattr(ext, 'cleanup'):
                 try:
                     ext.cleanup()
-                except:
-                    pass
+                except Exception:
+                    pass        
         self.executor.shutdown(wait=False)
