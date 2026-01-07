@@ -124,6 +124,14 @@ class App:
         if fg_hwnd != self.hwnd:
             self.hide_window()
 
+    def handle_reload(self, ext_id):
+        """Wrapper to reload extension and give UI feedback"""
+        success = self.pm.reload_extension(ext_id)
+        if success:
+            self.window.footer.set_text(f"Extension '{ext_id}' reloaded successfully.")
+        else:
+            self.window.footer.set_text(f"Failed to reload extension '{ext_id}'. Check console.")
+
     def query(self, text, callback):
         """
         Initiates an async query.
@@ -133,12 +141,7 @@ class App:
         if self.active_extension:
             ext = next((e for e in self.pm.extensions if e.id == self.active_extension), None)
             if ext:
-                # Scoped search is usually fast enough to stay sync, 
-                # but for consistency we could wrap it. 
-                # For now, let's just return it immediately via callback.
                 results = ext.on_input(text)
-                # We need a dummy ID for scoped mode or handle it differently
-                # Passing 0 as ID since scoped mode is synchronous here
                 callback(results, -1) 
             return
 
@@ -147,32 +150,41 @@ class App:
         for ext in self.pm.extensions:
             if ext.id.lower().startswith(text.lower()) or text.lower() in ext.id.lower():
                 from api.types import ResultItem, Action
+                
+                # Define Context Actions (Ctrl+K)
+                ctx_actions = [
+                    Action(
+                        name="Open",
+                        handler=lambda e=ext: self.enter_extension_mode(e),
+                        close_on_action=False
+                    ),
+                    Action(
+                        name=f"Reload {ext.id}",
+                        handler=lambda e_id=ext.id: self.handle_reload(e_id),
+                        close_on_action=False # Keep window open to see result
+                    )
+                ]
+
                 item = ResultItem(
                     id=f"ext_open_{ext.id}",
                     name=ext.id.replace("_", " ").title(),
                     description="Open Extension",
-                    score=2000, #always on top
+                    score=2000, # always on top
                     action=Action(
                         name="Open",
                         handler=lambda e=ext: self.enter_extension_mode(e),
                         close_on_action=False
-                    )
+                    ),
+                    context_actions=ctx_actions
                 )
                 static_results.append(item)
         
-        # --- FIX START: Fire initial static results immediately ---
         if static_results:
             static_results.sort(key=lambda x: x.score, reverse=True)
-            # Send immediately so they appear instantly (ID -1 indicates static/system)
             callback(static_results, -1) 
-        # --- FIX END ---
-
 
         # 3. Call Async Manager
-        # We wrap the callback to merge static results if needed
         def result_wrapper(async_results, qid):
-            # Merge static results + async results
-            # (In a real app, you might want to deduplicate)
             combined = static_results + async_results
             combined.sort(key=lambda x: x.score, reverse=True)
             callback(combined, qid)
@@ -180,9 +192,15 @@ class App:
         self.pm.search_async(text, result_wrapper)
 
     def enter_extension_mode(self, extension):
-        self.active_extension = extension.id
-        custom_view = extension.get_extension_view(self.window)
-        self.window.set_mode_extension(extension.id.replace("_", " ").title(), custom_view)
+        # Always fetch the latest instance from PluginManager in case it was reloaded
+        current_ext = next((e for e in self.pm.extensions if e.id == extension.id), None)
+        if not current_ext:
+            print(f"Error: Extension {extension.id} not found (maybe failed reload?)")
+            return
+
+        self.active_extension = current_ext.id
+        custom_view = current_ext.get_extension_view(self.window)
+        self.window.set_mode_extension(current_ext.id.replace("_", " ").title(), custom_view)
 
     def exit_extension_mode(self):
         self.active_extension = None
