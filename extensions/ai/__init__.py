@@ -1,25 +1,17 @@
 # extensions/ai/__init__.py
 import os
-import markdown
 from PySide6.QtWidgets import (QWidget, QVBoxLayout, QLabel, QScrollArea, 
                                QFrame, QSizePolicy, QApplication, QLineEdit,
                                QFormLayout, QPushButton, QMessageBox)
 from PySide6.QtCore import Qt, Signal, QThread, Slot
-from PySide6.QtGui import QFont
 
 from google import genai
 from google.genai import types, errors
 
 from api.extension import Extension
-
-# --- THEME (Reused) ---
-THEME = {
-    "user_bg": "#45475a",
-    "ai_bg": "#313244",
-    "text": "#cdd6f4",
-    "accent": "#89b4fa",
-    "error": "#f38ba8"
-}
+# Import the custom Markdown Engine
+from .markdown_engine.widget import ChatCanvas
+from .markdown_engine.constants import THEME
 
 # --- WORKER THREAD ---
 class GeminiWorker(QThread):
@@ -68,42 +60,7 @@ class GeminiWorker(QThread):
         except Exception as e:
             self.error_occurred.emit(f"System Error: {str(e)}")
 
-# --- UI COMPONENTS (ChatBubble, ChatView) ---
-class ChatBubble(QFrame):
-    def __init__(self, text, is_user=False, is_error=False):
-        super().__init__()
-        self.setFrameShape(QFrame.NoFrame)
-        self.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Minimum)
-        
-        layout = QVBoxLayout(self)
-        if is_user:
-            layout.setContentsMargins(60, 5, 10, 5)
-            align = Qt.AlignRight
-            bg_color = THEME["user_bg"]
-        else:
-            layout.setContentsMargins(10, 5, 60, 5)
-            align = Qt.AlignLeft
-            bg_color = THEME["error"] if is_error else THEME["ai_bg"]
-
-        self.bubble = QLabel()
-        self.bubble.setWordWrap(True)
-        self.bubble.setTextInteractionFlags(Qt.TextSelectableByMouse)
-        self.bubble.setOpenExternalLinks(True)
-        
-        if not is_user and not is_error:
-            try:
-                html = markdown.markdown(text, extensions=['fenced_code', 'nl2br'])
-                style = f"""<style>p, li {{ color: {THEME['text']}; font-family: 'Segoe UI'; font-size: 14px; margin: 0; }} code {{ background: #1e1e2e; padding: 2px 4px; }} pre {{ background: #1e1e2e; padding: 10px; }} a {{ color: {THEME['accent']}; }}</style>"""
-                self.bubble.setText(style + html)
-                self.bubble.setTextFormat(Qt.RichText)
-            except:
-                self.bubble.setText(text)
-        else:
-            self.bubble.setText(text)
-            self.bubble.setFont(QFont("Segoe UI", 11))
-
-        self.bubble.setStyleSheet(f"QLabel {{ background-color: {bg_color}; color: {THEME['text']}; border-radius: 12px; padding: 12px 16px; }}")
-        layout.addWidget(self.bubble, 0, align)
+# --- UI COMPONENTS ---
 
 class ChatView(QWidget):
     def __init__(self, parent_window, extension):
@@ -114,77 +71,89 @@ class ChatView(QWidget):
         self.layout = QVBoxLayout(self)
         self.layout.setContentsMargins(0, 0, 0, 0)
         
+        # 1. Setup Scroll Area
         self.scroll_area = QScrollArea()
         self.scroll_area.setWidgetResizable(True)
         self.scroll_area.setFrameShape(QFrame.NoFrame)
         self.scroll_area.setStyleSheet("background: transparent; border: none;")
         self.scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
         
-        self.scroll_content = QWidget()
-        self.scroll_content.setStyleSheet("background: transparent;")
-        self.content_layout = QVBoxLayout(self.scroll_content)
-        self.content_layout.setContentsMargins(10, 10, 10, 10)
-        self.content_layout.addStretch() 
-        self.scroll_area.setWidget(self.scroll_content)
+        # 2. Setup Canvas (The Markdown Engine)
+        self.canvas = ChatCanvas()
+        self.canvas.paste_requested.connect(self.handle_paste_request)
+        self.scroll_area.setWidget(self.canvas)
+        
         self.layout.addWidget(self.scroll_area)
 
         self.history = [] 
         self.is_loading = False
-        self.loading_bubble = None
         
         # Check configuration immediately
         if not self.extension.client:
-             self.add_bubble("⚠️ API Key not found. Please configure it in Settings > AI Chat.", is_error=True)
+             self.canvas.add_message("⚠️ **API Key not found.**\nPlease configure it in `Settings > AI Chat`.", is_user=False)
         elif not self.extension.has_greeted:
-            self.add_bubble(f"Hello! I am {self.extension.model_name}. How can I help you?", is_user=False)
+            self.canvas.add_message(f"Hello! I am **{self.extension.model_name}**. How can I help you today?", is_user=False)
             self.extension.has_greeted = True
 
-    def add_bubble(self, text, is_user=False, is_error=False):
-        bubble = ChatBubble(text, is_user, is_error)
-        self.content_layout.insertWidget(self.content_layout.count() - 1, bubble)
-        self.scroll_to_bottom()
-
     def scroll_to_bottom(self):
+        """Forces the scroll area to the bottom after layout updates."""
         QApplication.processEvents()
         sb = self.scroll_area.verticalScrollBar()
         sb.setValue(sb.maximum())
+
+    def handle_paste_request(self):
+        """Redirects paste requests from the canvas to the search input."""
+        if hasattr(self.parent_window, 'search_bar'):
+            self.parent_window.search_bar.search_input.setFocus()
+            self.parent_window.search_bar.search_input.paste()
 
     def handle_enter(self):
         if self.is_loading: return
         text = self.parent_window.search_bar.search_input.text().strip()
         if not text: return
 
-        self.add_bubble(text, is_user=True)
+        # 1. Add User Message
+        self.canvas.add_message(text, is_user=True)
         self.parent_window.search_bar.search_input.clear()
+        self.scroll_to_bottom()
         
-        self.add_bubble("Thinking...", is_user=False)
-        self.loading_bubble = self.content_layout.itemAt(self.content_layout.count() - 2).widget()
+        # 2. Add Temporary "Thinking" Message
+        self.canvas.add_message("_Thinking..._", is_user=False)
         self.is_loading = True
+        self.scroll_to_bottom()
         
-        # Pass current client and model from extension (in case they changed)
+        # 3. Start Worker
         self.worker = GeminiWorker(self.extension.client, self.extension.model_name, self.history, text)
         self.worker.response_ready.connect(self.on_response)
         self.worker.error_occurred.connect(self.on_error)
         self.worker.start()
 
+    def _remove_last_message(self):
+        """Helper to remove the 'Thinking...' message."""
+        if self.canvas.messages:
+            self.canvas.messages.pop()
+            self.canvas.recalculate_layout()
+            self.canvas.update()
+
     @Slot(str)
     def on_response(self, text):
-        self._cleanup_loading()
+        self._remove_last_message()
+        self.is_loading = False
+        
         self.history.append({'role': 'user', 'text': self.worker.user_input})
         self.history.append({'role': 'model', 'text': text})
-        self.add_bubble(text, is_user=False)
+        
+        self.canvas.add_message(text, is_user=False)
+        self.scroll_to_bottom()
 
     @Slot(str)
     def on_error(self, error_msg):
-        self._cleanup_loading()
-        self.add_bubble(f"Error: {error_msg}", is_error=True)
-
-    def _cleanup_loading(self):
+        self._remove_last_message()
         self.is_loading = False
-        if self.loading_bubble:
-            try: self.loading_bubble.deleteLater()
-            except: pass
-            self.loading_bubble = None
+        
+        formatted_error = f"**Error:** {error_msg}"
+        self.canvas.add_message(formatted_error, is_user=False)
+        self.scroll_to_bottom()
 
     def filter_items(self, text): pass
     def handle_key(self, event):
@@ -264,7 +233,7 @@ class AIExtension(Extension):
     def __init__(self, core_app):
         super().__init__(core_app)
         self.name = "AI Chat"
-        self.description = "Chat with Google Gemini"
+        self.description = "Chat with Google Gemini (Markdown Supported)"
         self.has_greeted = False
         self.client = None
         self.model_name = "gemini-2.0-flash"

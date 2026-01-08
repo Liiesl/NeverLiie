@@ -2,6 +2,7 @@
 import os
 import importlib.util
 import sys
+import traceback
 import concurrent.futures
 import time
 import threading
@@ -61,7 +62,7 @@ class ExtensionManager:
             return self._instantiate_extension(module, folder_name)
                         
         except Exception as e:
-            print(f"[Error] Failed to load {folder_name}: {e}")
+            print(f"[Error] Failed to load {folder_name}: {e}\n{traceback.format_exc()}")
             # Clean up partial load
             module_name = f"ext_{folder_name}"
             if module_name in sys.modules:
