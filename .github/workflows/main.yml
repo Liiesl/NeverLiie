@@ -31,7 +31,7 @@ jobs:
           include-package: |
             markdown
             sqlite3
-            google-genai
+            google
           mingw64: true
           enable-plugins: pyside6
           company-name: "Liiesl"
