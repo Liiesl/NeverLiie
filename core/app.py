@@ -145,13 +145,12 @@ class App:
                 callback(results, -1) 
             return
 
-        # 2. Root Mode - Inject "Open Extension" commands immediately
+        # 2. Root Mode - Calculate Static Results
         static_results = []
         for ext in self.pm.extensions:
             if ext.id.lower().startswith(text.lower()) or text.lower() in ext.id.lower():
                 from api.types import ResultItem, Action
                 
-                # Define Context Actions (Ctrl+K)
                 ctx_actions = [
                     Action(
                         name="Open",
@@ -161,7 +160,7 @@ class App:
                     Action(
                         name=f"Reload {ext.id}",
                         handler=lambda e_id=ext.id: self.handle_reload(e_id),
-                        close_on_action=False # Keep window open to see result
+                        close_on_action=False
                     )
                 ]
 
@@ -169,7 +168,7 @@ class App:
                     id=f"ext_open_{ext.id}",
                     name=ext.id.replace("_", " ").title(),
                     description="Open Extension",
-                    score=2000, # always on top
+                    score=2000, 
                     action=Action(
                         name="Open",
                         handler=lambda e=ext: self.enter_extension_mode(e),
@@ -179,9 +178,11 @@ class App:
                 )
                 static_results.append(item)
         
-        if static_results:
-            static_results.sort(key=lambda x: x.score, reverse=True)
-            callback(static_results, -1) 
+        # --- CHANGE START ---
+        # REMOVED: immediate callback(static_results, -1). 
+        # This prevents the UI from resizing to a small list and then immediately 
+        # expanding to a large list (the "collapse/reopen" effect).
+        # --- CHANGE END ---
 
         # 3. Call Async Manager
         def result_wrapper(async_results, qid):

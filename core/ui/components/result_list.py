@@ -144,22 +144,29 @@ class ResultListContainer(QStackedWidget):
         self.remove_custom_widget()
         
         # --- PRE-CACHING LOGIC ---
-        # 1. Identify which icons we are missing
-        # 2. Load them NOW, convert to QPixmap(28x28) immediately
         for item in results:
             if item.icon_path and item.icon_path not in self.delegate.pixmap_cache:
-                # This line hits the disk (the 176ms spike happens HERE now, not during animation)
                 qicon = self.icon_provider.icon(QFileInfo(item.icon_path))
-                
-                # Convert to Pixmap immediately. This is GPU-friendly and fast to draw.
                 pixmap = qicon.pixmap(28, 28) 
                 self.delegate.pixmap_cache[item.icon_path] = pixmap
         # -------------------------
 
         current_row = self.result_list.currentRow()
+        
+        # --- CHANGE START ---
+        # 1. Block signals so footer/selection logic doesn't freak out during clear()
+        self.result_list.blockSignals(True)
+        # 2. Disable viewport updates to prevent painting an empty white box
+        self.result_list.setUpdatesEnabled(False)
+        self.result_list.viewport().setUpdatesEnabled(False)
+        
         self.result_list.clear()
         
         if not results:
+            # Re-enable if empty
+            self.result_list.blockSignals(False)
+            self.result_list.viewport().setUpdatesEnabled(True)
+            self.result_list.setUpdatesEnabled(True)
             return 0 
 
         total_height = 0
@@ -177,10 +184,21 @@ class ResultListContainer(QStackedWidget):
                 widget = item_data.widget_factory()
                 self.result_list.setItemWidget(l_item, widget)
         
+        # Restore selection
         if current_row >= 0 and current_row < len(results):
             self.result_list.setCurrentRow(current_row)
         else:
             self.result_list.setCurrentRow(0)
+            
+        # Re-enable everything
+        self.result_list.viewport().setUpdatesEnabled(True)
+        self.result_list.setUpdatesEnabled(True)
+        self.result_list.blockSignals(False)
+
+        # Force a single selection event so the footer updates to the correct item
+        if self.result_list.currentItem():
+             self._on_change(self.result_list.currentItem(), None)
+        # --- CHANGE END ---
             
         return total_height
 

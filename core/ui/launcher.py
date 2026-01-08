@@ -223,7 +223,13 @@ class LauncherWindow(QWidget):
         if self.result_container.currentIndex() != 0: return
 
         text = self.search_bar.get_text()
-        self.result_container.update_results([])
+        
+        # --- CHANGE START ---
+        # REMOVED: self.result_container.update_results([]) 
+        # We keep the old results visible while the new query runs.
+        # This prevents the window from collapsing to 0 height temporarily.
+        # --- CHANGE END ---
+        
         self.footer.set_text("Searching...")
 
         def bridge_callback(results, qid):
@@ -234,14 +240,15 @@ class LauncherWindow(QWidget):
     @Slot(list, int, str)
     def handle_results(self, results, qid, query_text):
         if self.result_container.currentIndex() != 0: return
+        # Ensure we don't process stale results if the user typed fast
         if query_text != self.search_bar.get_text(): return
         
-        with Profiler("Total Handle Results"): # <--- ADD THIS
-            
+        with Profiler("Total Handle Results"):
             count = len(results)
             
-            # This is a likely suspect: creating widgets
-            with Profiler("Update List Items"): # <--- ADD THIS
+            with Profiler("Update List Items"):
+                # This swaps the items. Since we didn't clear them in perform_search,
+                # the UI goes directly from [Old List] -> [New List]
                 content_height = self.result_container.update_results(results)
             
             if count == 0:
@@ -249,8 +256,7 @@ class LauncherWindow(QWidget):
                 self.animate_resize(0, 0)
             else:
                 self.update_footer_info(self.result_container.get_current_data())
-                # This prepares the animation
-                with Profiler("Setup Animation"): # <--- ADD THIS
+                with Profiler("Setup Animation"):
                     self.animate_resize(count, content_height)
 
     def update_footer_info(self, item_data):
