@@ -37,8 +37,8 @@ jobs:
           company-name: "Liiesl"
           product-name: "NeverLiie"
           file-description: "NeverLiie Launcher"
-          file-version: "0.0.27"
-          product-version: "0.0.27"
+          file-version: "0.2.8"
+          product-version: "0.2.8"
 
       - name: Zip Main Build Output
         run: |
