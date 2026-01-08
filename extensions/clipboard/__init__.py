@@ -1,6 +1,7 @@
 # extensions/clipboard/__init__.py
 import time
 import os
+import ctypes # Added for debug
 from api.extension import Extension
 from api.types import ResultItem, Action
 from .monitor import ClipboardMonitor
@@ -70,11 +71,10 @@ class ClipboardExtension(Extension):
                 id=f"clip_{idx}",
                 name=display_text,
                 description=f"{desc} | Copy to paste",
-                icon_path=None, # You could add a 'copy.png' here
-                score=100 if is_keyword else 50, # High score if typed 'cb'
+                icon_path=None, 
+                score=100 if is_keyword else 50, 
                 action=Action(
                     name="Paste",
-                    # Capture 'row' in the lambda default arg so it doesn't change
                     handler=lambda r=row: self.paste_item(r),
                     close_on_action=True
                 )
@@ -97,10 +97,14 @@ class ClipboardExtension(Extension):
             self.monitor.set_text(item_data.get('content_text', ''))
         
         # 2. Give the OS focus back to the previous window
-        # The core app hides the window, but we need a tiny delay 
-        # to ensure the previous window is active before sending keys.
+        
+        hwnd_before = ctypes.windll.user32.GetForegroundWindow()
         time.sleep(0.15) 
         
+        hwnd_after = ctypes.windll.user32.GetForegroundWindow()
+        if hwnd_before == hwnd_after:
+            print("[DEBUG-CLIP] WARNING: Window handle DID NOT CHANGE. Keys will be sent to the Launcher (hidden or not)!", flush=True)
+
         # 3. Simulate Ctrl+V
         send_ctrl_v()
         

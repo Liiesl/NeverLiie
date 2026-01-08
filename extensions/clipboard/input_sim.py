@@ -1,51 +1,74 @@
+# extensions/clipboard/input_sim.py
 import ctypes
-import time
 from ctypes import wintypes
 
 # Win32 Constants
 INPUT_KEYBOARD = 1
 KEYEVENTF_KEYUP = 0x0002
-VK_CONTROL = 0x11
+VK_LCONTROL = 0xA2 # Left Control
 VK_V = 0x56
 
-# C Types for SendInput
+# Architecture check
+is_64bit = ctypes.sizeof(ctypes.c_void_p) == 8
+ULONG_PTR = ctypes.c_ulonglong if is_64bit else ctypes.c_ulong
+
 class KEYBDINPUT(ctypes.Structure):
     _fields_ = [
         ("wVk", wintypes.WORD),
         ("wScan", wintypes.WORD),
         ("dwFlags", wintypes.DWORD),
         ("time", wintypes.DWORD),
-        ("dwExtraInfo", ctypes.c_ulong)
+        ("dwExtraInfo", ULONG_PTR)
+    ]
+
+class MOUSEINPUT(ctypes.Structure):
+    _fields_ = [
+        ("dx", wintypes.LONG),
+        ("dy", wintypes.LONG),
+        ("mouseData", wintypes.DWORD),
+        ("dwFlags", wintypes.DWORD),
+        ("time", wintypes.DWORD),
+        ("dwExtraInfo", ULONG_PTR)
+    ]
+
+class HARDWAREINPUT(ctypes.Structure):
+    _fields_ = [
+        ("uMsg", wintypes.DWORD),
+        ("wParamL", wintypes.WORD),
+        ("wParamH", wintypes.WORD)
+    ]
+
+# The Union is critical for correct size calculation
+class INPUT_UNION(ctypes.Union):
+    _fields_ = [
+        ("mi", MOUSEINPUT),
+        ("ki", KEYBDINPUT),
+        ("hi", HARDWAREINPUT)
     ]
 
 class INPUT(ctypes.Structure):
     _fields_ = [
         ("type", wintypes.DWORD),
-        ("ki", KEYBDINPUT)
+        ("u", INPUT_UNION)
     ]
 
 def send_ctrl_v():
-    """Simulates pressing Ctrl+V to paste content."""
     user32 = ctypes.windll.user32
     
-    # Helper to create INPUT structure
     def create_input(vk, flags):
         x = INPUT()
         x.type = INPUT_KEYBOARD
-        x.ki.wVk = vk
-        x.ki.dwFlags = flags
+        x.u.ki.wVk = vk
+        x.u.ki.dwFlags = flags
         return x
 
-    # 1. Press Ctrl
-    inp_ctrl_down = create_input(VK_CONTROL, 0)
-    # 2. Press V
-    inp_v_down = create_input(VK_V, 0)
-    # 3. Release V
-    inp_v_up = create_input(VK_V, KEYEVENTF_KEYUP)
-    # 4. Release Ctrl
-    inp_ctrl_up = create_input(VK_CONTROL, KEYEVENTF_KEYUP)
-
-    inputs = (INPUT * 4)(inp_ctrl_down, inp_v_down, inp_v_up, inp_ctrl_up)
+    inputs = (INPUT * 4)(
+        create_input(VK_LCONTROL, 0),
+        create_input(VK_V, 0),
+        create_input(VK_V, KEYEVENTF_KEYUP),
+        create_input(VK_LCONTROL, KEYEVENTF_KEYUP)
+    )
     
-    # SendInput returns the number of events inserted
+    # On x64, sizeof(INPUT) should be 40. On x86, 28.
+    # The previous code was sending 20, causing the failure.
     user32.SendInput(4, inputs, ctypes.sizeof(INPUT))
