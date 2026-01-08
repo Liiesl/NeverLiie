@@ -271,6 +271,8 @@ class AIExtension(Extension):
 
         # Initialize ID early so we can load settings
         self.id = "ai" 
+        # Set Trigger Key (Tab)
+        self.trigger_key = Qt.Key_Tab
         
     def get_extension_view(self, parent_window):
         # Ensure client is loaded (in case it wasn't at startup)

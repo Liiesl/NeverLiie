@@ -53,6 +53,9 @@ class LauncherWindow(QWidget):
         self.setup_connections()
         self.setup_shortcuts()
         
+        # Install event filter on the input to catch triggers (like Tab)
+        self.search_bar.search_input.installEventFilter(self)
+
         # Animations
         self.anim_geometry = QPropertyAnimation(self, b"geometry")
         self.anim_geometry.setEasingCurve(QEasingCurve.OutExpo) 
@@ -343,12 +346,36 @@ class LauncherWindow(QWidget):
             self.core.hide_window()
 
     def eventFilter(self, obj, event):
+        # Handle Triggers in Root Mode (e.g. Tab for AI)
+        if obj == self.search_bar.search_input and event.type() == QEvent.KeyPress:
+            if self.result_container.currentIndex() == 0: # Only in Root Mode
+                key = event.key()
+                modifiers = event.modifiers()
+                
+                # Check all extensions for a matching trigger
+                for ext in self.core.pm.extensions:
+                    if getattr(ext, 'trigger_key', None) == key:
+                        
+                        # Guard: If it's a regular character (A-Z, 0-9), require a modifier (Ctrl/Alt)
+                        # This prevents typing "a" from launching an extension bound to "A"
+                        is_char = (Qt.Key_A <= key <= Qt.Key_Z) or (Qt.Key_0 <= key <= Qt.Key_9)
+                        has_mod = modifiers != Qt.NoModifier
+                        
+                        if is_char and not has_mod:
+                            continue
+                            
+                        # Match found! Switch mode and consume event.
+                        self.core.enter_extension_mode(ext)
+                        return True
+
+        # Existing Extension-Specific Key Handling
         if self.result_container.currentIndex() == 1 and event.type() == QEvent.KeyPress:
              widget = self.result_container.get_custom_widget()
              if hasattr(widget, "handle_key"):
                 if event.key() in (Qt.Key_Up, Qt.Key_Down, Qt.Key_Return, Qt.Key_Enter, Qt.Key_Tab):
                     widget.handle_key(event)
                     return True
+                    
         return super().eventFilter(obj, event)
 
     # --- ANIMATION ---

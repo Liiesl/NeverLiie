@@ -12,6 +12,9 @@ class Extension:
         self.context = context
         # ID is now managed by the context, but we can expose it if needed for UI labels
         self.id = context._ext_id 
+        
+        # Define a key to quick-launch this extension (e.g., Qt.Key_Tab)
+        self.trigger_key = None 
 
     def on_input(self, text: str) -> List[ResultItem]:
         """Return search results for the root launcher."""
