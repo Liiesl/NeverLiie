@@ -41,6 +41,9 @@ class LauncherWindow(QWidget):
         super().__init__()
         self.core = core_app
         
+        # State for restoring query when going back
+        self._last_root_query = ""
+
         # Async signals
         self.receiver = ResultReceiver()
         self.receiver.results_ready.connect(self.handle_results)
@@ -175,11 +178,24 @@ class LauncherWindow(QWidget):
     def set_mode_root(self):
         self.search_bar.set_mode_root()
         self.result_container.remove_custom_widget()
-        self.result_container.update_results([])
         self.command_menu.hide()
-        self.animate_resize(0, 0)
+        
+        # Logic to restore previous query if it exists
+        if self._last_root_query:
+            restored_text = self._last_root_query
+            self._last_root_query = ""
+            self.search_bar.set_text(restored_text)
+            self.search_bar.search_input.selectAll()
+            # Manually trigger search for the restored text
+            self.on_text_edited(restored_text)
+        else:
+            self.result_container.update_results([])
+            self.animate_resize(0, 0)
 
     def set_mode_extension(self, ext_name, custom_widget=None):
+        # Capture current text before switching
+        self._last_root_query = self.search_bar.get_text()
+
         self.search_bar.set_mode_extension(ext_name)
         self.command_menu.hide()
         

@@ -93,6 +93,10 @@ class SearchBar(QFrame):
     def get_text(self):
         return self.search_input.text()
 
+    def set_text(self, text):
+        """Programmatically sets text without triggering textEdited signal."""
+        self.search_input.setText(text)
+
     def focus_input(self):
         self.search_input.setFocus()
         self.search_input.selectAll()
