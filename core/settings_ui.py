@@ -192,31 +192,30 @@ class SettingsWindow(QWidget):
         # Re-populate
         current_idx = 1
         for ext in self.core.pm.extensions:
-            # Only add if enabled AND has settings widget
-            if self.core.settings.is_extension_enabled(ext.id):
-                widget = ext.get_settings_widget()
-                if widget:
-                    # Add Page
-                    container = QWidget()
-                    layout = QVBoxLayout(container)
-                    layout.setContentsMargins(40, 40, 40, 40)
-                    
-                    # Header
-                    header = QLabel(getattr(ext, 'name', ext.id))
-                    header.setStyleSheet(f"font-size: 20px; font-weight: bold; color: {THEME['text']}; margin-bottom: 20px;")
-                    layout.addWidget(header)
-                    
-                    layout.addWidget(widget)
-                    layout.addStretch()
-                    
-                    self.content_area.addWidget(container)
-                    
-                    # Add Sidebar Button
-                    btn_name = getattr(ext, 'name', ext.id)
-                    btn = self.create_nav_btn(btn_name, current_idx)
-                    self.ext_nav_layout.addWidget(btn)
-                    
-                    current_idx += 1
+            # Add if extension has settings widget (regardless of enabled/disabled status)
+            widget = ext.get_settings_widget()
+            if widget:
+                # Add Page
+                container = QWidget()
+                layout = QVBoxLayout(container)
+                layout.setContentsMargins(40, 40, 40, 40)
+                
+                # Header
+                header = QLabel(getattr(ext, 'name', ext.id))
+                header.setStyleSheet(f"font-size: 20px; font-weight: bold; color: {THEME['text']}; margin-bottom: 20px;")
+                layout.addWidget(header)
+                
+                layout.addWidget(widget)
+                layout.addStretch()
+                
+                self.content_area.addWidget(container)
+                
+                # Add Sidebar Button
+                btn_name = getattr(ext, 'name', ext.id)
+                btn = self.create_nav_btn(btn_name, current_idx)
+                self.ext_nav_layout.addWidget(btn)
+                
+                current_idx += 1
 
         # Reset selection to 0
         self.switch_page(0)
