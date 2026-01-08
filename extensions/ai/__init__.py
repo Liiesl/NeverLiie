@@ -2,8 +2,9 @@
 import os
 from PySide6.QtWidgets import (QWidget, QVBoxLayout, QLabel, QScrollArea, 
                                QFrame, QSizePolicy, QApplication, QLineEdit,
-                               QFormLayout, QPushButton, QMessageBox)
-from PySide6.QtCore import Qt, Signal, QThread, Slot
+                               QFormLayout, QPushButton, QMessageBox, 
+                               QComboBox, QCheckBox, QHBoxLayout, QButtonGroup, QToolButton)
+from PySide6.QtCore import Qt, Signal, QThread, Slot, QSize
 
 from google import genai
 from google.genai import types, errors
@@ -18,12 +19,13 @@ class GeminiWorker(QThread):
     response_ready = Signal(str)
     error_occurred = Signal(str)
 
-    def __init__(self, client, model_name, history, user_input):
+    def __init__(self, client, model_name, history, user_input, persona_instruction=""):
         super().__init__()
         self.client = client
         self.model_name = model_name
         self.history = history 
         self.user_input = user_input
+        self.persona_instruction = persona_instruction
 
     def run(self):
         if not self.client:
@@ -32,6 +34,13 @@ class GeminiWorker(QThread):
 
         try:
             contents = []
+            
+            # Inject Persona/System Instruction if exists (Simulated via first message or config)
+            if self.persona_instruction:
+                 # Note: Gemini 1.5+ supports system_instruction in config, 
+                 # but for simplicity we assume standard message structure or config injection
+                 pass 
+
             for msg in self.history:
                 role = 'model' if msg['role'] == 'model' else 'user'
                 contents.append(types.Content(
@@ -43,11 +52,17 @@ class GeminiWorker(QThread):
                 role='user',
                 parts=[types.Part.from_text(text=self.user_input)]
             ))
+            
+            # config setup
+            gen_config = types.GenerateContentConfig(
+                temperature=0.7,
+                system_instruction=self.persona_instruction if self.persona_instruction else None
+            )
 
             response = self.client.models.generate_content(
                 model=self.model_name,
                 contents=contents,
-                config=types.GenerateContentConfig(temperature=0.7)
+                config=gen_config
             )
             
             if response.text:
@@ -96,13 +111,11 @@ class ChatView(QWidget):
             self.extension.has_greeted = True
 
     def scroll_to_bottom(self):
-        """Forces the scroll area to the bottom after layout updates."""
         QApplication.processEvents()
         sb = self.scroll_area.verticalScrollBar()
         sb.setValue(sb.maximum())
 
     def handle_paste_request(self):
-        """Redirects paste requests from the canvas to the search input."""
         if hasattr(self.parent_window, 'search_bar'):
             self.parent_window.search_bar.search_input.setFocus()
             self.parent_window.search_bar.search_input.paste()
@@ -123,13 +136,17 @@ class ChatView(QWidget):
         self.scroll_to_bottom()
         
         # 3. Start Worker
-        self.worker = GeminiWorker(self.extension.client, self.extension.model_name, self.history, text)
+        # Pass the Persona Instruction from settings
+        persona = self.extension.get_setting("persona_prompt", "")
+        
+        history_to_send = self.history if self.extension.get_setting("enable_history", True) else []
+
+        self.worker = GeminiWorker(self.extension.client, self.extension.model_name, history_to_send, text, persona)
         self.worker.response_ready.connect(self.on_response)
         self.worker.error_occurred.connect(self.on_error)
         self.worker.start()
 
     def _remove_last_message(self):
-        """Helper to remove the 'Thinking...' message."""
         if self.canvas.messages:
             self.canvas.messages.pop()
             self.canvas.recalculate_layout()
@@ -140,8 +157,9 @@ class ChatView(QWidget):
         self._remove_last_message()
         self.is_loading = False
         
-        self.history.append({'role': 'user', 'text': self.worker.user_input})
-        self.history.append({'role': 'model', 'text': text})
+        if self.extension.get_setting("enable_history", True):
+            self.history.append({'role': 'user', 'text': self.worker.user_input})
+            self.history.append({'role': 'model', 'text': text})
         
         self.canvas.add_message(text, is_user=False)
         self.scroll_to_bottom()
@@ -165,35 +183,107 @@ class AISettingsWidget(QWidget):
     def __init__(self, extension):
         super().__init__()
         self.extension = extension
+        self.setup_ui()
         
+    def setup_ui(self):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
-        
-        form_layout = QFormLayout()
-        form_layout.setSpacing(15)
-        
-        # API Key Field
+        layout.setSpacing(20)
+
+        # 1. INPUT FIELD: API Key
         self.api_input = QLineEdit()
         self.api_input.setEchoMode(QLineEdit.Password)
         self.api_input.setPlaceholderText("Enter Google Gemini API Key")
         self.api_input.setText(self.extension.get_setting("api_key", ""))
+        self.add_form_row(layout, "API Key", "Required for Gemini Access", self.api_input)
+
+        # 2. DROPDOWN: Model Selection
+        self.model_combo = QComboBox()
+        self.model_combo.addItems([
+            "gemini-3-flash-preview", 
+            "gemini-2.5-flash", 
+            "gemini-2.5-pro", 
+            "gemini-flash-latest",
+            "gemini-flash-lite-latest"
+        ])
+        # Set current index based on saved setting
+        current_model = self.extension.get_setting("model_name", "gemini-2.0-flash")
+        index = self.model_combo.findText(current_model)
+        if index >= 0:
+            self.model_combo.setCurrentIndex(index)
         
-        # Model Field
-        self.model_input = QLineEdit()
-        self.model_input.setText(self.extension.get_setting("model_name", "gemini-2.0-flash"))
-        self.model_input.setPlaceholderText("e.g. gemini-1.5-flash")
+        self.add_form_row(layout, "Model", "Select the AI intelligence level", self.model_combo)
+
+        # 3. TOGGLE SWITCH: Enable History
+        self.history_toggle = QCheckBox()
+        self.history_toggle.setCursor(Qt.PointingHandCursor)
+        self.history_toggle.setChecked(self.extension.get_setting("enable_history", True))
+        # Custom Style for Switch Look
+        self.history_toggle.setStyleSheet(f"""
+            QCheckBox::indicator {{ width: 40px; height: 20px; border-radius: 10px; background-color: {THEME['surface']}; border: 1px solid {THEME['border']}; }}
+            QCheckBox::indicator:checked {{ background-color: {THEME['accent']}; border: 1px solid {THEME['accent']}; }}
+            QCheckBox::indicator:checked:hover {{ background-color: #b4befe; }}
+        """)
+        self.add_form_row(layout, "Chat History", "Remember previous messages in session", self.history_toggle)
+
+        # 4. VISUAL RADIO BUTTONS (Icon Only): Persona Selection
+        # We will use Emojis as "Icons" for this example, but these could be image paths
+        self.persona_group = QButtonGroup(self)
+        self.persona_group.setExclusive(True)
         
-        lbl_api = QLabel("API Key:")
-        lbl_api.setStyleSheet(f"color: {THEME['text']};")
-        lbl_model = QLabel("Model Name:")
-        lbl_model.setStyleSheet(f"color: {THEME['text']};")
+        persona_layout = QHBoxLayout()
+        persona_layout.setSpacing(10)
+        persona_layout.setAlignment(Qt.AlignLeft)
+
+        # Define Options: (ID, Icon, Tooltip, Prompt)
+        options = [
+            ("default", "🤖", "Helpful Assistant", "You are a helpful AI assistant."),
+            ("coder", "💻", "Code Expert", "You are an expert programmer. Provide only code or technical explanations."),
+            ("creative", "🎨", "Creative Writer", "You are a creative writer. Use colorful language."),
+            ("pirate", "🏴‍☠️", "Pirate Mode", "You are a pirate. Speak like one.")
+        ]
+
+        saved_persona = self.extension.get_setting("persona_id", "default")
+
+        for pid, icon, tooltip, prompt in options:
+            btn = QToolButton()
+            btn.setText(icon)
+            btn.setCheckable(True)
+            btn.setToolTip(tooltip)
+            btn.setFixedSize(40, 40)
+            btn.setCursor(Qt.PointingHandCursor)
+            # Store prompt in dynamic property
+            btn.setProperty("prompt", prompt)
+            btn.setProperty("pid", pid)
+            
+            # Style for "Icon Only" Radio look
+            btn.setStyleSheet(f"""
+                QToolButton {{
+                    background-color: {THEME['surface']};
+                    border: 1px solid {THEME['border']};
+                    border-radius: 8px;
+                    font-size: 20px;
+                }}
+                QToolButton:checked {{
+                    background-color: {THEME['accent']};
+                    border: 1px solid {THEME['accent']};
+                }}
+                QToolButton:hover {{ border-color: {THEME['text']}; }}
+            """)
+            
+            self.persona_group.addButton(btn)
+            persona_layout.addWidget(btn)
+            
+            if pid == saved_persona:
+                btn.setChecked(True)
         
-        form_layout.addRow(lbl_api, self.api_input)
-        form_layout.addRow(lbl_model, self.model_input)
-        
-        layout.addLayout(form_layout)
-        
+        # Container for the radio row
+        radio_container = QWidget()
+        radio_container.setLayout(persona_layout)
+        self.add_form_row(layout, "Persona", "Choose the AI's personality", radio_container)
+
         # Save Button
+        layout.addSpacing(20)
         self.btn_save = QPushButton("Save Settings")
         self.btn_save.setCursor(Qt.PointingHandCursor)
         self.btn_save.setFixedHeight(35)
@@ -207,26 +297,73 @@ class AISettingsWidget(QWidget):
             QPushButton:hover {{ background-color: #b4befe; }}
         """)
         self.btn_save.clicked.connect(self.save_settings)
-        
         layout.addWidget(self.btn_save)
+        
         layout.addStretch()
 
-    def save_settings(self):
-        api_key = self.api_input.text().strip()
-        model_name = self.model_input.text().strip()
+    def add_form_row(self, layout, label_text, sub_text, widget):
+        """Helper to create a standardized settings row"""
+        row_widget = QWidget()
+        row_layout = QHBoxLayout(row_widget)
+        row_layout.setContentsMargins(0, 0, 0, 0)
         
+        # Text Column
+        text_col = QVBoxLayout()
+        text_col.setSpacing(2)
+        lbl = QLabel(label_text)
+        lbl.setStyleSheet(f"font-weight: bold; font-size: 14px; color: {THEME['text']};")
+        sub = QLabel(sub_text)
+        sub.setStyleSheet(f"font-size: 11px; color: {THEME['subtext']};")
+        text_col.addWidget(lbl)
+        text_col.addWidget(sub)
+        
+        row_layout.addLayout(text_col)
+        row_layout.addStretch()
+        
+        # Widget Column (Right Aligned)
+        # Ensure widget doesn't expand too much
+        if isinstance(widget, QComboBox) or isinstance(widget, QLineEdit):
+            widget.setFixedWidth(200)
+        
+        row_layout.addWidget(widget)
+        layout.addWidget(row_widget)
+
+    def save_settings(self):
+        # 1. Get Input
+        api_key = self.api_input.text().strip()
+        
+        # 2. Get Dropdown
+        model_name = self.model_combo.currentText()
+        
+        # 3. Get Toggle
+        enable_history = self.history_toggle.isChecked()
+        
+        # 4. Get Radio (Icon)
+        checked_btn = self.persona_group.checkedButton()
+        persona_id = "default"
+        persona_prompt = ""
+        if checked_btn:
+            persona_id = checked_btn.property("pid")
+            persona_prompt = checked_btn.property("prompt")
+        
+        # Save to Storage
         self.extension.set_setting("api_key", api_key)
         self.extension.set_setting("model_name", model_name)
+        self.extension.set_setting("enable_history", enable_history)
+        self.extension.set_setting("persona_id", persona_id)
+        self.extension.set_setting("persona_prompt", persona_prompt)
         
-        # Re-initialize the client in the extension
+        # Reload Client
         self.extension.reload_client()
         
-        # Feedback
-        btn_text = self.btn_save.text()
+        # Feedback Animation
+        original_text = self.btn_save.text()
         self.btn_save.setText("Saved!")
+        self.btn_save.setStyleSheet(f"background-color: #a6e3a1; color: #1e1e2e; border-radius: 6px; font-weight: bold;")
         QApplication.processEvents()
-        QThread.msleep(500)
-        self.btn_save.setText(btn_text)
+        QThread.msleep(600)
+        self.btn_save.setText(original_text)
+        self.btn_save.setStyleSheet(f"background-color: {THEME['accent']}; color: {THEME['ai_bg']}; border-radius: 6px; font-weight: bold;")
 
 # --- MAIN EXTENSION ---
 class AIExtension(Extension):
@@ -238,13 +375,10 @@ class AIExtension(Extension):
         self.client = None
         self.model_name = "gemini-2.0-flash"
 
-        # Initialize ID early so we can load settings
         self.id = "ai" 
-        # Set Trigger Key (Tab)
         self.trigger_key = Qt.Key_Tab
         
     def get_extension_view(self, parent_window):
-        # Ensure client is loaded (in case it wasn't at startup)
         if not self.client:
             self.reload_client()
         return ChatView(parent_window, self)
