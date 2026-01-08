@@ -17,7 +17,7 @@ class ClipboardExtension(Extension):
         
         # --- START CHANGE: Use centralized path ---
         if _monitor is None:
-            # context.data_path is now injected by PluginManager
+            # context.data_path is now injected by ExtensionManager
             # e.g., C:\Users\User\AppData\Roaming\PyLauncher\extensions\clipboard
             
             db_path = os.path.join(self.context.data_path, 'clipboard.db')
@@ -108,4 +108,4 @@ class ClipboardExtension(Extension):
         # Return the Custom Raycast-like UI
         return ClipboardView(self.context, parent_window)
 
-Plugin = ClipboardExtension
+Extension = ClipboardExtension

@@ -297,3 +297,5 @@ class AIExtension(Extension):
 
     def on_input(self, text):
         return []
+
+Extension = AIExtension

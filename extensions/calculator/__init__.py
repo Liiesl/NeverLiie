@@ -81,7 +81,7 @@ class CalculatorWidget(QWidget):
         layout.addStretch() 
         layout.addWidget(self.container)
 
-class CalculatorPlugin(Extension):
+class CalculatorExtension(Extension):
     def __init__(self, core_app):
         super().__init__(core_app)
         self.engine = MathEngine()
@@ -136,6 +136,6 @@ class CalculatorPlugin(Extension):
                 score=1000, # High score ensures it stays at top if valid
                 widget_factory=make_widget,
                 height=80
-            )]
-            
-        return []
+        )]
+
+Extension = CalculatorExtension

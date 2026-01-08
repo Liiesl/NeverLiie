@@ -1,12 +1,12 @@
 # NeverLiie
 
-A lightweight, extensible productivity launcher for Windows with a plugin architecture. Access applications, tools, and utilities through a global hotkey-driven interface.
+A lightweight, extensible productivity launcher for Windows with an extension architecture. Access applications, tools, and utilities through a global hotkey-driven interface.
 
 ## Features
 
 - **Global Hotkey Launcher**: Activate the launcher with a global keyboard shortcut (Alt+Space)
 - **System Tray Integration**: Minimize to system tray with quick access
-- **Plugin/Extension System**: Extensible architecture for adding custom functionality
+- **Extension System**: Extensible architecture for adding custom functionality
 - **Settings Management**: Configure extensions and preferences through a settings UI
 - **Built-in Extensions**:
   - **AI Assistant**: Integration with Gemini API for AI-powered queries
@@ -27,7 +27,7 @@ NeverLiie/
 │   └── types.py                    # Type definitions
 ├── core/                           # Core application logic
 │   ├── app.py                      # Main application class
-│   ├── plugin_manager.py           # Plugin/extension loader
+│   ├── extension_manager.py       # Extension loader
 │   ├── settings.py                 # Settings management
 │   ├── settings_ui.py              # Settings interface
 │   ├── ui.py                       # UI components
@@ -135,7 +135,7 @@ extensions/myextension/
 ### Key Components
 
 - **App** (`core/app.py`): Main application class managing lifecycle, hotkeys, and UI
-- **PluginManager** (`core/plugin_manager.py`): Dynamically loads extensions from disk
+- **ExtensionManager** (`core/extension_manager.py`): Dynamically loads extensions from disk
 - **Extension** (`api/extension.py`): Base class for all extensions
 - **SettingsManager** (`core/settings.py`): Handles configuration persistence
 

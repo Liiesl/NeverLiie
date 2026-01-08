@@ -40,7 +40,7 @@ class ExtensionRow(QFrame):
         self.checkbox = QCheckBox()
         self.checkbox.setCursor(Qt.PointingHandCursor)
         
-        # Safely get ID (PluginManager should have assigned this, but we fallback safely)
+        # Safely get ID (ExtensionManager should have assigned this, but we fallback safely)
         ext_id = getattr(extension, 'id', display_name)
         is_enabled = self.settings.is_extension_enabled(ext_id)
         
@@ -97,7 +97,7 @@ class SettingsWindow(QWidget):
         self.nav_buttons = {} # Map page_index -> button
         
         # 1. Main Extensions Manager Button
-        self.btn_general = self.create_nav_btn("Plugins Manager", 0)
+        self.btn_general = self.create_nav_btn("Extensions Manager", 0)
         self.sidebar_layout.addWidget(self.btn_general)
         
         # Divider
@@ -126,7 +126,7 @@ class SettingsWindow(QWidget):
         ext_layout = QVBoxLayout(self.ext_page)
         ext_layout.setContentsMargins(40, 40, 40, 40)
         
-        lbl_ext_header = QLabel("Manage Plugins")
+        lbl_ext_header = QLabel("Manage Extensions")
         lbl_ext_header.setStyleSheet(f"font-size: 20px; font-weight: bold; color: {THEME['text']}; margin-bottom: 10px;")
         ext_layout.addWidget(lbl_ext_header)
 

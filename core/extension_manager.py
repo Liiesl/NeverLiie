@@ -1,4 +1,4 @@
-# core/plugin_manager.py
+# core/extension_manager.py
 import os
 import importlib.util
 import sys
@@ -8,7 +8,7 @@ import threading
 from api.extension import Extension
 from api.context import ExtensionContext
 
-class PluginManager:
+class ExtensionManager:
     def __init__(self, core_app):
         self.extensions = []
         self.core = core_app
@@ -152,7 +152,7 @@ class PluginManager:
         finally:
             end_time = time.perf_counter()
             elapsed_ms = (end_time - start_time) * 1000
-            # Optional: Log slow plugins
+            # Optional: Log slow extensions
             if elapsed_ms > 200:
                 print(f"[{ext.id}] Slow: {elapsed_ms:.2f} ms")
 

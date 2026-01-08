@@ -37,7 +37,7 @@ def path_matches_pattern(path, patterns, base_path):
             return True
     return False
 
-class EverythingPlugin(Extension):
+class EverythingExtension(Extension):
     def __init__(self, api):
         super().__init__(api)
         self.setup_dll()
@@ -121,5 +121,5 @@ class EverythingPlugin(Extension):
 
         return results
 
-# Export the class as 'Plugin' for the manager to find
-Plugin = EverythingPlugin
+# Export the class as 'Extension' for the manager to find
+Extension = EverythingExtension

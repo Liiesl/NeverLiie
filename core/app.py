@@ -10,7 +10,7 @@ from PySide6.QtCore import QObject, Signal, QTimer, QAbstractNativeEventFilter
 from .ui import LauncherWindow, create_app_icon
 from .settings_ui import SettingsWindow
 from .settings import SettingsManager
-from .plugin_manager import PluginManager
+from .extension_manager import ExtensionManager
 from .win32_utils import (
     WM_HOTKEY, MOD_ALT, VK_SPACE, MSG, 
     force_focus, get_foreground_window, user32
@@ -65,8 +65,8 @@ class App:
         self.icon = create_app_icon()
         self.qapp.setWindowIcon(self.icon)
         
-        self.pm = PluginManager(self)
-        self.load_plugins()
+        self.pm = ExtensionManager(self)
+        self.load_extensions()
         
         self.active_extension = None
         self.window = LauncherWindow(self)
@@ -87,7 +87,7 @@ class App:
         self.setup_tray()
         self.center_window()
 
-    def load_plugins(self):
+    def load_extensions(self):
         base = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
         ext_path = os.path.join(base, "extensions")
         self.pm.load_extensions(ext_path)
@@ -192,7 +192,7 @@ class App:
         self.pm.search_async(text, result_wrapper)
 
     def enter_extension_mode(self, extension):
-        # Always fetch the latest instance from PluginManager in case it was reloaded
+        # Always fetch the latest instance from ExtensionManager in case it was reloaded
         current_ext = next((e for e in self.pm.extensions if e.id == extension.id), None)
         if not current_ext:
             print(f"Error: Extension {extension.id} not found (maybe failed reload?)")

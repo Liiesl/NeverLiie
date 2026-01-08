@@ -8,7 +8,7 @@ try:
 except ImportError as e:
     print(f"[SystemApps] CRITICAL IMPORT ERROR: {e}", flush=True)
 
-class SystemAppsPlugin(Extension):
+class SystemAppsExtension(Extension):
     def __init__(self, core_app):
         super().__init__(core_app)
         try:
@@ -40,4 +40,4 @@ class SystemAppsPlugin(Extension):
         results.sort(key=lambda x: x.score, reverse=True)
         return results[:15]
 
-Plugin = SystemAppsPlugin
+Extension = SystemAppsExtension
