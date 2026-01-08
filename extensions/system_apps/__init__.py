@@ -12,8 +12,11 @@ class SystemAppsExtension(Extension):
     def __init__(self, core_app):
         super().__init__(core_app)
         try:
-            self.window_indexer = WindowIndexer()
+            # 1. Initialize AppIndexer first to load aliases
             self.app_indexer = AppIndexer()
+            
+            # 2. Pass the loaded alias registry to WindowIndexer
+            self.window_indexer = WindowIndexer(self.app_indexer.alias_registry)
         except Exception as e:
             print(f"[SystemApps] Error creating indexers: {e}", flush=True)
 

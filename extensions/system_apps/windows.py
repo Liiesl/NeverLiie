@@ -1,7 +1,8 @@
 import ctypes
 import ctypes.wintypes
 import sys
-from typing import List, Optional
+import os
+from typing import List, Optional, Dict
 from api.types import ResultItem, Action
 
 class Win32:
@@ -103,8 +104,9 @@ class Win32:
         return buff.value
 
 class WindowIndexer:
-    def __init__(self):
+    def __init__(self, alias_registry: Dict[str, str] = None):
         self.ignored_classes = {"Progman", "Button", "Shell_TrayWnd", "WorkerW"}
+        self.alias_registry = alias_registry or {}
 
     def search(self, query: str) -> List[ResultItem]:
         if not query: return []
@@ -112,73 +114,107 @@ class WindowIndexer:
         query_lower = query.lower()
         results = []
 
-        stats = {
-            "scanned": 0,
-            "visible": 0,
-            "is_top_level": 0,
-            "not_toolwindow": 0,
-            "has_title": 0,
-            "matches": 0
-        }
+        # --- ALIAS CALCULATION START ---
+        # Mirrors logic in apps.py to find what the user might be referring to
+        alias_targets = {}
+        for alias_key, target_name in self.alias_registry.items():
+            ratio = len(query) / len(alias_key)
+            fuzzy_score = 0
+            
+            if alias_key.startswith(query_lower):
+                fuzzy_score = 250 + (ratio * 150)
+            elif query_lower in alias_key:
+                fuzzy_score = 200 + (ratio * 100)
+            else:
+                continue
+                
+            if target_name not in alias_targets or fuzzy_score > alias_targets[target_name]:
+                alias_targets[target_name] = fuzzy_score
+        # --- ALIAS CALCULATION END ---
 
         def enum_callback(hwnd, lParam):
-            stats["scanned"] += 1
-            
             # 1. Basic Visibility
             if not Win32.user32.IsWindowVisible(hwnd): 
                 return True
-            stats["visible"] += 1
 
             # 2. Owner Check (Top Level)
-            # FIX: ctypes returns NULL handles as None, not 0.
             owner = Win32.user32.GetWindow(hwnd, Win32.GW_OWNER)
             if owner is not None: 
                 return True
-            stats["is_top_level"] += 1
 
-            # 3. Style Check (Filter out tooltips/tray helpers)
+            # 3. Style Check
             ex_style = Win32.user32.GetWindowLongW(hwnd, Win32.GWL_EXSTYLE)
             is_tool_window = ex_style & Win32.WS_EX_TOOLWINDOW
             is_app_window = ex_style & Win32.WS_EX_APPWINDOW
             if is_tool_window and not is_app_window:
                 return True
-            stats["not_toolwindow"] += 1
 
-            # 4. Cloak check (UWP apps that are minimized/suspended)
+            # 4. Cloak check
             if Win32.is_window_cloaked(hwnd):
                 return True
 
-            # 5. Title Match
+            # 5. Get Title and Path
             title = Win32.get_window_text(hwnd)
-            if not title:
-                return True
-            stats["has_title"] += 1
+            if not title: return True
+            title_lower = title.lower()
 
-            if query_lower not in title.lower():
+            exe_path = Win32.get_process_path(hwnd)
+            exe_name_lower = ""
+            if exe_path:
+                # Extracts "code" from "C:\...\Code.exe"
+                exe_name_lower = os.path.splitext(os.path.basename(exe_path))[0].lower()
+
+            # --- MATCHING LOGIC ---
+            
+            is_match = False
+            base_score = 1000 # Windows generally beat Apps (which cap around 700)
+            boost_score = 0
+
+            # A. Direct Title Match
+            if query_lower in title_lower:
+                is_match = True
+                if title_lower.startswith(query_lower): boost_score += 200
+                if title_lower == query_lower: boost_score += 500
+
+            # B. Alias / Executable Match
+            # We check if an alias target (e.g. "Visual Studio Code" or "winword") 
+            # appears in the Window Title OR matches the Executable Name.
+            for target_part, alias_score in alias_targets.items():
+                target_part = target_part.lower()
+                
+                # Check 1: Target is in the window title?
+                # e.g. target "code" in title "Project - Visual Studio Code" -> Hit
+                if target_part in title_lower:
+                    is_match = True
+                    if alias_score > boost_score:
+                        boost_score = alias_score
+
+                # Check 2: Target is in the executable name?
+                # e.g. target "winword" matches exe "winword" -> Hit
+                if exe_name_lower and target_part in exe_name_lower:
+                    is_match = True
+                    # If we matched the binary name via alias, that's a strong signal
+                    if alias_score > boost_score:
+                        boost_score = alias_score + 100
+
+            if not is_match:
                 return True
-            stats["matches"] += 1
 
             # 6. Class Filter
             cls_name = Win32.get_window_class(hwnd)
             if cls_name in self.ignored_classes:
                 return True
 
-            # Passed all filters!
-            exe_path = Win32.get_process_path(hwnd)
+            # Calculate Final Score
+            final_score = base_score + boost_score
             
-            # --- UPDATED SCORING LOGIC ---
-            # We use a base score of 1000 to ensure windows 
-            # always beat App Indexer results (which max out around 700)
-            score = 1000 
-            
-            # Bonus if the title starts with the query
-            if title.lower().startswith(query_lower): 
-                score += 200
-                
-            # Extra bonus for exact matches
-            if title.lower() == query_lower:
-                score += 500
-            
+            # Extra boost for exact alias match
+            for alias_key in self.alias_registry.keys():
+                if alias_key == query_lower:
+                    # If user typed exactly the alias, and we found a match, boost heavily
+                    final_score += 150
+                    break
+
             results.append(ResultItem(
                 id=f"win_{hwnd}",
                 name=title,
@@ -189,7 +225,7 @@ class WindowIndexer:
                     handler=lambda h=hwnd: self._switch_to_window(h),
                     close_on_action=True
                 ),
-                score=score
+                score=int(final_score)
             ))
             return True
 
@@ -200,8 +236,6 @@ class WindowIndexer:
 
     def _switch_to_window(self, hwnd):
         try:
-            # Check if minimized
-            # Note: IsIconic is standard Win32 for 'is minimized'
             if Win32.user32.IsIconic(hwnd):
                 Win32.user32.ShowWindow(hwnd, Win32.SW_RESTORE)
             else:
