@@ -42,7 +42,8 @@ DEFAULT_ENGINES = {
     "imdb": {"name": "IMDb", "url": "https://www.imdb.com/find?q={}", "default_bang": "!imdb"},
     "twitter": {"name": "X (Twitter)", "url": "https://twitter.com/search?q={}", "default_bang": "!tw"},
     "twitch": {"name": "Twitch", "url": "https://www.twitch.tv/search?term={}", "default_bang": "!tv"},
-    "perplexity": {"name": "Perplexity AI", "url": "https://www.perplexity.ai/search?q={}", "default_bang": "!pp"}
+    "perplexity": {"name": "Perplexity AI", "url": "https://www.perplexity.ai/search?q={}", "default_bang": "!pp"},
+    "svgrepo": {"name": "SVG Repo", "url": "https://www.svgrepo.com/vectors/{}/" , "default_bang": "!svg"}
 }
 # --- Custom UI Components ---
 
