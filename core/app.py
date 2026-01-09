@@ -178,12 +178,6 @@ class App:
                 )
                 static_results.append(item)
         
-        # --- CHANGE START ---
-        # REMOVED: immediate callback(static_results, -1). 
-        # This prevents the UI from resizing to a small list and then immediately 
-        # expanding to a large list (the "collapse/reopen" effect).
-        # --- CHANGE END ---
-
         # 3. Call Async Manager
         def result_wrapper(async_results, qid):
             combined = static_results + async_results
@@ -206,6 +200,12 @@ class App:
     def exit_extension_mode(self):
         self.active_extension = None
         self.window.set_mode_root()
+
+    def get_active_extension_instance(self):
+        """Returns the actual extension object currently active, or None."""
+        if not self.active_extension:
+            return None
+        return next((e for e in self.pm.extensions if e.id == self.active_extension), None)
 
     def center_window(self):
         screen = self.qapp.primaryScreen().geometry()

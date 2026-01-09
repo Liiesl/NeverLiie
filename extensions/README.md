@@ -43,13 +43,49 @@ def on_input(self, text: str) -> List[ResultItem]:
 
 #### Optional Methods
 
-**`get_extension_view(parent_window: QWidget) -> Optional[QWidget]`**
+#### **`get_extension_view(parent_window: QWidget) -> Optional[QWidget]`**
 
-Return a custom QWidget to display in the launcher (e.g., chat interface, calculator preview).
+Returns a custom `QWidget` that replaces the entire results list area. This is used for "App-like" extensions (e.g., AI Chat, Notepad).
+
+**Interaction Hooks:**
+Because the Launcher keeps focus on the Search Bar, your view must implement these methods to respond to the user:
+
+*   **`filter_items(self, text: str)`**: Called when the user types in the search bar.
+*   **`navigate(self, direction: int)`**: Called when user presses Up (`-1`) or Down (`1`).
+*   **`handle_enter(self)`**: Called when user presses Enter.
+*   **`handle_key(self, event: QEvent)`**: (Optional) Called for other raw keys like Tab.
 
 ```python
+class MyCustomWidget(QWidget):
+    def filter_items(self, text):
+        # Filter your list based on text
+        pass
+
+    def navigate(self, direction):
+        # Move selection Up (-1) or Down (1)
+        pass
+
+    def handle_enter(self):
+        # Execute selected item
+        pass
+
 def get_extension_view(self, parent_window: QWidget) -> Optional[QWidget]:
     return MyCustomWidget(parent_window)
+```
+
+**`get_context_actions() -> List[Action]`**
+
+Return a list of `Action` objects to display in the Command Menu (`Ctrl+K`) **only** when the extension's custom view (`get_extension_view`) is active.
+
+*   **Note:** If your extension uses the standard search list (Index 0), you do not need this. Use `ResultItem(context_actions=)` instead.
+*   **Dynamic:** This is called every time `Ctrl+K` is pressed, allowing you to return different actions based on the state of your custom widget.
+
+```python
+def get_context_actions(self) -> List[Action]:
+    return [
+        Action("Save", self.save_data, close_on_action=False),
+        Action("Clear", self.clear_data, close_on_action=False)
+    ]
 ```
 
 **`get_settings_widget() -> Optional[QWidget]`**
@@ -108,7 +144,7 @@ class ResultItem:
     action: Optional[Action] = None      # Primary action (Enter key)
     score: int = 0                       # Relevance score (higher = top)
     context_actions: List[Action] = []   # Right-click menu actions
-    widget_factory: Callable = None      # Custom UI for this result
+    widget_factory: Callable = None      # Custom UI for this SPECIFIC ROW in the list
     height: int = 64                     # Item height in pixels
 ```
 
@@ -134,6 +170,46 @@ action = Action(
     handler=open_file,
     close_on_action=True
 )
+```
+
+## Context Menus (Command Palette)
+
+The launcher supports two types of Command Menus (`Ctrl+K`), depending on the extension's mode.
+
+### Mode A: Result List (Standard)
+When the user is searching in the main list, the Command Menu is populated by the **selected item**.
+
+*   **Source:** `ResultItem.context_actions`
+*   **Use Case:** "Run as Admin", "Copy Path", "Delete File".
+*   **Implementation:** Defined inside `on_input` when creating results.
+
+### Mode B: Custom View (Extension Specific)
+When the user has entered an extension (e.g., AI Chat, Notepad) and acts on the custom widget, the Command Menu is populated by the **extension itself**.
+
+*   **Source:** `Extension.get_context_actions()`
+*   **Use Case:** "Save Note", "Clear Chat", "Export PDF".
+*   **Implementation:** Defined in the Extension class.
+
+### Dynamic Menus in Custom Views
+Because `get_context_actions()` is called on-demand, your extension can check the state of its custom widget to show relevant actions.
+
+```python
+def get_extension_view(self, parent):
+    self.widget = MyTextEditor()
+    return self.widget
+
+def get_context_actions(self):
+    # Check internal state of the widget
+    if self.widget.has_selection():
+        return [
+            Action("Copy Selection", self.widget.copy),
+            Action("Cut Selection", self.widget.cut)
+        ]
+    else:
+        return [
+            Action("Save File", self.save),
+            Action("Close Editor", self.close)
+        ]
 ```
 
 ## Creating a New Extension
@@ -238,7 +314,7 @@ class SimpleExtension(Extension):
         ) for item in matches]
 ```
 
-### Custom Widget
+### Custom Row Widget
 
 ```python
 class CalculatorWidget(QWidget):
@@ -261,6 +337,45 @@ class CalculatorExtension(Extension):
             widget_factory=make_widget,
             height=80
         )]
+```
+
+### Custom Extension View Page 
+
+```python
+class MyListWidget(QWidget):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.layout = QVBoxLayout(self)
+        self.list = QListWidget()
+        self.layout.addWidget(self.list)
+        self.items = ["Item A", "Item B", "Item C"]
+        self.filter_items("")
+
+    def filter_items(self, text):
+        """Called when user types in search bar"""
+        self.list.clear()
+        for i in self.items:
+            if text.lower() in i.lower():
+                self.list.addItem(i)
+        self.list.setCurrentRow(0)
+
+    def navigate(self, direction):
+        """Called on Up/Down arrows"""
+        curr = self.list.currentRow()
+        count = self.list.count()
+        if count > 0:
+            new_idx = max(0, min(curr + direction, count - 1))
+            self.list.setCurrentRow(new_idx)
+
+    def handle_enter(self):
+        """Called on Enter key"""
+        item = self.list.currentItem()
+        if item:
+            print(f"Selected: {item.text()}")
+
+class InteractiveExtension(Extension):
+    def get_extension_view(self, parent):
+        return MyListWidget(parent)
 ```
 
 ### Multiple Actions

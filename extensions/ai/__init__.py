@@ -1,5 +1,6 @@
 # extensions/ai/__init__.py
 import os
+from typing import List
 from PySide6.QtWidgets import (QWidget, QVBoxLayout, QLabel, QScrollArea, 
                                QFrame, QSizePolicy, QApplication, QLineEdit,
                                QFormLayout, QPushButton, QMessageBox, 
@@ -10,6 +11,7 @@ from google import genai
 from google.genai import types, errors
 
 from api.extension import Extension
+from api.types import Action
 # Import the custom Markdown Engine
 from .markdown_engine.widget import ChatCanvas
 from .markdown_engine.constants import THEME
@@ -115,6 +117,13 @@ class ChatView(QWidget):
         sb = self.scroll_area.verticalScrollBar()
         sb.setValue(sb.maximum())
 
+    def clear_chat(self):
+        """Clears the visual chat and history"""
+        self.canvas.clear_messages()
+        self.history = []
+        self.canvas.add_message("Chat cleared.", is_user=False)
+        self.scroll_to_bottom()
+
     def handle_paste_request(self):
         if hasattr(self.parent_window, 'search_bar'):
             self.parent_window.search_bar.search_input.setFocus()
@@ -200,11 +209,10 @@ class AISettingsWidget(QWidget):
         # 2. DROPDOWN: Model Selection
         self.model_combo = QComboBox()
         self.model_combo.addItems([
-            "gemini-3-flash-preview", 
-            "gemini-2.5-flash", 
-            "gemini-2.5-pro", 
-            "gemini-flash-latest",
-            "gemini-flash-lite-latest"
+            "gemini-2.0-flash", 
+            "gemini-2.0-flash-lite", 
+            "gemini-1.5-flash", 
+            "gemini-1.5-pro",
         ])
         # Set current index based on saved setting
         current_model = self.extension.get_setting("model_name", "gemini-2.0-flash")
@@ -374,6 +382,9 @@ class AIExtension(Extension):
         self.has_greeted = False
         self.client = None
         self.model_name = "gemini-2.0-flash"
+        
+        # Reference to the current visual widget
+        self.current_view = None
 
         self.id = "ai" 
         self.trigger_key = Qt.Key_Tab
@@ -381,7 +392,39 @@ class AIExtension(Extension):
     def get_extension_view(self, parent_window):
         if not self.client:
             self.reload_client()
-        return ChatView(parent_window, self)
+        
+        self.current_view = ChatView(parent_window, self)
+        return self.current_view
+
+    def get_context_actions(self) -> List[Action]:
+        """Specific Command Menu actions for the Chat View"""
+        actions = []
+        
+        # Action: Clear Chat
+        actions.append(Action(
+            name="Clear Conversation",
+            handler=self.handle_clear_chat,
+            close_on_action=False # Keep window open
+        ))
+
+        # Action: Open AI Settings directly
+        actions.append(Action(
+            name="AI Settings",
+            handler=self.handle_open_settings,
+            close_on_action=True
+        ))
+
+        return actions
+
+    def handle_clear_chat(self):
+        if self.current_view:
+            self.current_view.clear_chat()
+            
+    def handle_open_settings(self):
+        # We need to access the core to show settings
+        # The ExtensionContext gives us access to settings, but showing the UI is a Core App function
+        # Using context._core is a bit of a hack, but standard pattern here
+        self.context._core.show_settings()
 
     def get_settings_widget(self):
         return AISettingsWidget(self)
@@ -402,5 +445,3 @@ class AIExtension(Extension):
 
     def on_input(self, text):
         return []
-
-Extension = AIExtension

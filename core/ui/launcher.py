@@ -243,12 +243,6 @@ class LauncherWindow(QWidget):
 
         text = self.search_bar.get_text()
         
-        # --- CHANGE START ---
-        # REMOVED: self.result_container.update_results([]) 
-        # We keep the old results visible while the new query runs.
-        # This prevents the window from collapsing to 0 height temporarily.
-        # --- CHANGE END ---
-        
         self.footer.set_text("Searching...")
 
         def bridge_callback(results, qid):
@@ -308,6 +302,9 @@ class LauncherWindow(QWidget):
             self.core.hide_window()
         action.handler()
         self.command_menu.hide()
+        # Return focus to input if window is still open
+        if self.isVisible():
+            self.search_bar.focus_input()
 
     # --- KEY HANDLING & MENU ---
     def toggle_command_menu(self):
@@ -317,13 +314,27 @@ class LauncherWindow(QWidget):
             self.search_bar.focus_input()
             return
 
-        if self.result_container.currentIndex() != 0: return
+        # Scenario 1: Standard List View (Root or Scoped)
+        # This uses the specific actions of the selected ResultItem
+        if self.result_container.currentIndex() == 0:
+            data = self.result_container.get_current_data()
+            if not data or not data.context_actions:
+                return
+            self.command_menu.set_actions(data.context_actions)
         
-        data = self.result_container.get_current_data()
-        if not data or not data.context_actions:
-            return
+        # Scenario 2: Custom Extension View (e.g. AI Chat)
+        # This uses global actions defined by the extension itself (OPTIONAL)
+        elif self.result_container.currentIndex() == 1:
+            ext_instance = self.core.get_active_extension_instance()
+            if not ext_instance:
+                return
+            
+            actions = ext_instance.get_context_actions()
+            if not actions:
+                return
+            
+            self.command_menu.set_actions(actions)
 
-        self.command_menu.set_actions(data.context_actions)
         self.resizeEvent(None) # Recalculate position
         self.command_menu.show()
         self.command_menu.raise_()
@@ -331,6 +342,14 @@ class LauncherWindow(QWidget):
     def handle_navigation(self, direction):
         if self.command_menu.isVisible():
             self.command_menu.navigate(direction)
+            return
+
+        # Handle Custom View (Extension Mode)
+        if self.result_container.currentIndex() == 1:
+            widget = self.result_container.get_custom_widget()
+            if hasattr(widget, "navigate"):
+                widget.navigate(direction)
+        # Handle Standard Result List
         else:
             self.result_container.navigate(direction)
 
@@ -356,8 +375,6 @@ class LauncherWindow(QWidget):
                 for ext in self.core.pm.extensions:
                     if getattr(ext, 'trigger_key', None) == key:
                         
-                        # Guard: If it's a regular character (A-Z, 0-9), require a modifier (Ctrl/Alt)
-                        # This prevents typing "a" from launching an extension bound to "A"
                         is_char = (Qt.Key_A <= key <= Qt.Key_Z) or (Qt.Key_0 <= key <= Qt.Key_9)
                         has_mod = modifiers != Qt.NoModifier
                         
@@ -369,12 +386,16 @@ class LauncherWindow(QWidget):
                         return True
 
         # Existing Extension-Specific Key Handling
+        # CHANGED: Added `and not self.command_menu.isVisible()`
+        # This ensures that if the command menu is open, we do NOT send keys 
+        # to the extension, but let them fall through to SearchBar/handle_navigation.
         if self.result_container.currentIndex() == 1 and event.type() == QEvent.KeyPress:
-             widget = self.result_container.get_custom_widget()
-             if hasattr(widget, "handle_key"):
-                if event.key() in (Qt.Key_Up, Qt.Key_Down, Qt.Key_Return, Qt.Key_Enter, Qt.Key_Tab):
-                    widget.handle_key(event)
-                    return True
+             if not self.command_menu.isVisible():
+                 widget = self.result_container.get_custom_widget()
+                 if hasattr(widget, "handle_key"):
+                    if event.key() in (Qt.Key_Up, Qt.Key_Down, Qt.Key_Return, Qt.Key_Enter, Qt.Key_Tab):
+                        widget.handle_key(event)
+                        return True
                     
         return super().eventFilter(obj, event)
 

@@ -1,7 +1,7 @@
 # api/extension.py
 from typing import List, Optional, Any
 from PySide6.QtWidgets import QWidget
-from .types import ResultItem
+from .types import ResultItem, Action
 # from .context import ExtensionContext (Implicit import for type hinting)
 
 class Extension:
@@ -23,8 +23,19 @@ class Extension:
     def get_extension_view(self, parent_window: QWidget) -> Optional[QWidget]:
         """
         Return a QWidget (e.g., Chat View) to be displayed in the launcher.
+        If this returns None, the extension uses the standard Result List (like System Apps).
         """
         return None
+    
+    def get_context_actions(self) -> List[Action]:
+        """
+        OPTIONAL: Return a list of Actions to display in the Command Menu (Ctrl+K)
+        ONLY when this extension's custom view (get_extension_view) is active.
+        
+        Extensions using the standard result list (like System Apps) do NOT need this,
+        as their context menu comes from the ResultItem itself.
+        """
+        return []
 
     def get_settings_widget(self) -> Optional[QWidget]:
         """
