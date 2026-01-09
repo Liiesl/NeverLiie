@@ -3,12 +3,10 @@ from PySide6.QtWidgets import (QStackedWidget, QListWidget, QListWidgetItem,
                                QStyledItemDelegate, QStyle, QFileIconProvider, 
                                QAbstractItemView, QSizePolicy)
 from PySide6.QtCore import Qt, QSize, QRect, QFileInfo, Signal
-from PySide6.QtGui import QColor, QFont, QPainter, QBrush, QPen
-import time
+from PySide6.QtGui import QColor, QFont, QPainter, QBrush, QPen, QIcon, QPixmap
+import os
 
 from ..theme import THEME
-
-from PySide6.QtGui import QPixmap # Add QPixmap to imports
 
 class ResultDelegate(QStyledItemDelegate):
     def __init__(self, parent=None):
@@ -41,7 +39,7 @@ class ResultDelegate(QStyledItemDelegate):
         full_rect = option.rect
         card_rect = full_rect.adjusted(self.h_margin, self.v_margin, -self.h_margin, -self.v_margin)
         
-        # --- 1. Background (Fast) ---
+        # --- 1. Background ---
         if option.state & QStyle.State_Selected:
             painter.setBrush(QColor(THEME["surface"]))
             painter.setPen(Qt.NoPen)
@@ -56,15 +54,14 @@ class ResultDelegate(QStyledItemDelegate):
             painter.restore()
             return
 
-        # --- 2. Icon (Optimized) ---
+        # --- 2. Icon ---
         icon_size = 28
         icon_x = card_rect.left() + 20
         icon_y = card_rect.top() + (card_rect.height() - icon_size) // 2
         
-        # DIRECT DRAWING: No file access, no scaling calculations.
-        # We look up a pre-scaled QPixmap from the cache.
         if item_data.icon_path and item_data.icon_path in self.pixmap_cache:
             pixmap = self.pixmap_cache[item_data.icon_path]
+            # Draw the cached pixmap directly
             painter.drawPixmap(icon_x, icon_y, pixmap)
         else:
             # Fallback circle if no icon
@@ -72,7 +69,7 @@ class ResultDelegate(QStyledItemDelegate):
             painter.setPen(Qt.NoPen)
             painter.drawEllipse(icon_x, icon_y, icon_size, icon_size)
 
-        # --- 3. Text (Optimized) ---
+        # --- 3. Text ---
         text_left = icon_x + icon_size + 15
         text_width = card_rect.right() - text_left - 15
         
@@ -109,7 +106,7 @@ class ResultListContainer(QStackedWidget):
         
     def setup_list(self):
         self.result_list = QListWidget()
-        self.delegate = ResultDelegate(self.result_list) # Keep reference to delegate
+        self.delegate = ResultDelegate(self.result_list)
         self.result_list.setItemDelegate(self.delegate)
         self.result_list.setVerticalScrollMode(QAbstractItemView.ScrollPerPixel)
         self.result_list.setUniformItemSizes(False)
@@ -121,7 +118,7 @@ class ResultListContainer(QStackedWidget):
         self.result_list.currentItemChanged.connect(self._on_change)
         
         self.addWidget(self.result_list)
-        self.icon_provider = QFileIconProvider() # Move provider here
+        self.icon_provider = QFileIconProvider()
         
     def setup_style(self):
         self.setStyleSheet(f"""
@@ -143,17 +140,29 @@ class ResultListContainer(QStackedWidget):
     def update_results(self, results):
         self.remove_custom_widget()
         
-        # --- PRE-CACHING LOGIC ---
+        # We need to distinguish between "System Icons" (like .exe) 
+        # and "Image Files" (like .svg, .png) that we want to render directly.
+        image_extensions = {'.svg', '.png', '.jpg', '.jpeg', '.ico', '.bmp'}
+
         for item in results:
             if item.icon_path and item.icon_path not in self.delegate.pixmap_cache:
-                qicon = self.icon_provider.icon(QFileInfo(item.icon_path))
+                path = item.icon_path
+                _, ext = os.path.splitext(path)
+                
+                if ext.lower() in image_extensions:
+                    # 1. It's an image/vector -> Load content directly
+                    # QIcon(path) will use QtSvg (if imported) to render the vector
+                    qicon = QIcon(path)
+                else:
+                    # 2. It's an app/file -> Ask OS for associated icon
+                    qicon = self.icon_provider.icon(QFileInfo(path))
+                
+                # Create the cached pixmap
                 pixmap = qicon.pixmap(28, 28) 
-                self.delegate.pixmap_cache[item.icon_path] = pixmap
-        # -------------------------
+                self.delegate.pixmap_cache[path] = pixmap
 
         current_row = self.result_list.currentRow()
         
-        # --- CHANGE START ---
         # 1. Block signals so footer/selection logic doesn't freak out during clear()
         self.result_list.blockSignals(True)
         # 2. Disable viewport updates to prevent painting an empty white box
@@ -198,7 +207,6 @@ class ResultListContainer(QStackedWidget):
         # Force a single selection event so the footer updates to the correct item
         if self.result_list.currentItem():
              self._on_change(self.result_list.currentItem(), None)
-        # --- CHANGE END ---
             
         return total_height
 
