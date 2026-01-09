@@ -63,6 +63,19 @@ class Win32:
     dwmapi.DwmGetWindowAttribute.argtypes = [HWND, DWORD, ctypes.c_void_p, DWORD]
     dwmapi.DwmGetWindowAttribute.restype = ctypes.c_int
 
+    # ADD these missing signatures:
+    kernel32.CloseHandle.argtypes = [HANDLE]
+    kernel32.CloseHandle.restype = BOOL
+    
+    user32.IsIconic.argtypes = [HWND]
+    user32.IsIconic.restype = BOOL
+    
+    user32.ShowWindow.argtypes = [HWND, ctypes.c_int]
+    user32.ShowWindow.restype = BOOL
+    
+    user32.SetForegroundWindow.argtypes = [HWND]
+    user32.SetForegroundWindow.restype = BOOL
+
     @staticmethod
     def get_window_text(hwnd: HWND) -> str:
         length = Win32.user32.GetWindowTextLengthW(hwnd)

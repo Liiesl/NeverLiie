@@ -4,6 +4,7 @@ import json
 import subprocess
 import ctypes
 from api.types import ResultItem, Action
+from .lnk_parser import resolve_lnk
 
 class AppIndexer:
     def __init__(self):
@@ -27,13 +28,12 @@ class AppIndexer:
             print(f"[System Apps] Error loading aliases: {e}")
 
     def refresh_index(self):
-        found_paths = set()
-        self.apps = []
+        target_map = {}  # exe_path.lower() -> app_data
         
         search_dirs = [
-            os.path.join(os.environ["APPDATA"], r"Microsoft\Windows\Start Menu\Programs"),
-            os.path.join(os.environ["PROGRAMDATA"], r"Microsoft\Windows\Start Menu\Programs"),
-            os.path.join(os.environ["LOCALAPPDATA"], r"Programs"),
+            os.path.join(os.environ.get("APPDATA", ""), r"Microsoft\Windows\Start Menu\Programs"),
+            os.path.join(os.environ.get("PROGRAMDATA", ""), r"Microsoft\Windows\Start Menu\Programs"),
+            os.path.join(os.environ.get("LOCALAPPDATA", ""), r"Programs"),
         ]
 
         path_env = os.environ.get("PATH", "")
@@ -41,40 +41,83 @@ class AppIndexer:
             if p and os.path.exists(p):
                 search_dirs.append(p)
 
-        valid_extensions = {".exe", ".lnk", ".bat", ".cmd"}
-        ignore_names = {"uninstall", "readme", "help", "website", "update", "installer", "configuration", "setup"}
+        valid_extensions = {".exe", ".lnk"}
+        ignore_names = {"uninstall", "readme", "help", "website", "update", "installer", "setup"}
 
         for directory in search_dirs:
-            if not os.path.exists(directory): continue
+            if not directory or not os.path.exists(directory):
+                continue
             
-            should_recurse = "Start Menu" in directory or "Programs" in directory
-            walker = os.walk(directory) if should_recurse else [(directory, [], os.listdir(directory))]
+            try:
+                is_start_menu = "Start Menu" in directory
+                
+                if is_start_menu:
+                    walker = os.walk(directory)
+                else:
+                    try:
+                        files = os.listdir(directory)
+                        walker = [(directory, [], files)]
+                    except PermissionError:
+                        continue
 
-            for root, _, files in walker:
-                for filename in files:
-                    name, ext = os.path.splitext(filename)
-                    lower_name = name.lower()
+                for root, _, files in walker:
+                    for filename in files:
+                        try:
+                            name, ext = os.path.splitext(filename)
+                            ext = ext.lower()
+                            if ext not in valid_extensions:
+                                continue
+                            
+                            lower_name = name.lower()
+                            if any(bad in lower_name for bad in ignore_names):
+                                continue
+                            
+                            full_path = os.path.normpath(os.path.join(root, filename))
+                            clean_name = name.replace(" - Shortcut", "")
+                            
+                            # Resolve target for deduplication
+                            if ext == ".lnk":
+                                resolved = resolve_lnk(full_path)
+                                target_path = resolved if resolved else full_path
+                            else:
+                                target_path = full_path
+                            
+                            target_key = target_path.lower()
+                            
+                            existing = target_map.get(target_key)
+                            
+                            # Prefer shortcuts (better display names)
+                            should_add = (
+                                existing is None or
+                                (ext == ".lnk" and not existing["is_shortcut"])
+                            )
+                            
+                            if should_add:
+                                target_map[target_key] = {
+                                    "name": clean_name,
+                                    "path": full_path,      # Launch path (.lnk or .exe)
+                                    "target": target_path,  # Actual .exe for icon/alias matching
+                                    "lower_name": clean_name.lower(),
+                                    "is_shortcut": ext == ".lnk"
+                                }
+                        except Exception:
+                            continue
+                            
+            except Exception as e:
+                print(f"[System Apps] Error scanning {directory}: {e}")
+                continue
 
-                    if ext.lower() not in valid_extensions: continue
-                    if any(bad in lower_name for bad in ignore_names): continue
-                    
-                    clean_name = name.replace(" - Shortcut", "")
-                    full_path = os.path.join(root, filename)
-
-                    if full_path not in found_paths:
-                        self.apps.append({
-                            "name": clean_name,
-                            "path": full_path,
-                            "lower_name": clean_name.lower(),
-                            "is_shortcut": ext.lower() == ".lnk"
-                        })
-                        found_paths.add(full_path)
+        self.apps = list(target_map.values())
+        print(f"[System Apps] Indexed {len(self.apps)} applications")
 
     def search(self, query):
-        if not query: return []
+        if not query:
+            return []
+        
         results = []
         query_lower = query.lower()
         
+        # Alias scoring
         alias_targets = {}
         for alias_key, target_name in self.alias_registry.items():
             ratio = len(query) / len(alias_key)
@@ -84,50 +127,45 @@ class AppIndexer:
                 fuzzy_score = 200 + (ratio * 100)
             else:
                 continue
-                
             if target_name not in alias_targets or fuzzy_score > alias_targets[target_name]:
                 alias_targets[target_name] = fuzzy_score
 
         for app in self.apps:
             score = 0
+            
+            # Match by name
             if query_lower in app['lower_name']:
-                score = 300 
-                if app['lower_name'].startswith(query_lower): score += 100
-                if app['lower_name'] == query_lower: score += 300
-                if app['is_shortcut']: score += 50
+                score = 300
+                if app['lower_name'].startswith(query_lower):
+                    score += 100
+                if app['lower_name'] == query_lower:
+                    score += 300
+                if app['is_shortcut']:
+                    score += 50
             
-            if score < 300:
-                for target_part, alias_score in alias_targets.items():
-                    if target_part in app['lower_name']:
-                        if alias_score > score:
-                            score = alias_score
+            # Match by alias (check both name and target exe)
+            target_lower = app.get('target', '').lower()
+            for target_part, alias_score in alias_targets.items():
+                if target_part in app['lower_name'] or target_part in target_lower:
+                    if alias_score > score:
+                        score = alias_score
             
-            if query_lower == app['lower_name']:
-                score += 200
-            
-            for alias_key, target_name in self.alias_registry.items():
-                if alias_key == query_lower and target_name in app['lower_name']:
-                    score += 150
-
             if score > 0:
                 launch_action = Action("Open Application", lambda p=app['path']: self._launch(p))
                 
-                context_actions = [
-                    launch_action,
-                    Action("Run as Administrator", lambda p=app['path']: self._launch_as_admin(p)),
-                    Action("Show in Explorer", lambda p=app['path']: self._show_in_explorer(p))
-                ]
-
-                item = ResultItem(
-                    id=app['path'],
+                results.append(ResultItem(
+                    id=app.get('target', app['path']),
                     name=app['name'],
-                    description=app['path'],
-                    icon_path=app['path'], 
+                    description=app.get('target', app['path']),
+                    icon_path=app.get('target', app['path']),
                     action=launch_action,
-                    context_actions=context_actions,
+                    context_actions=[
+                        launch_action,
+                        Action("Run as Administrator", lambda p=app['path']: self._launch_as_admin(p)),
+                        Action("Open File Location", lambda p=app['path']: self._show_in_explorer(p))
+                    ],
                     score=int(score)
-                )
-                results.append(item)
+                ))
                 
         results.sort(key=lambda x: x.score, reverse=True)
         return results
@@ -140,15 +178,12 @@ class AppIndexer:
 
     def _launch_as_admin(self, path):
         try:
-            # ShellExecuteW allows passing the "runas" verb which triggers the UAC prompt
-            # parameters: hwnd, verb, file, parameters, directory, show_cmd (1=SW_NORMAL)
             ctypes.windll.shell32.ShellExecuteW(None, "runas", path, None, None, 1)
         except Exception as e:
             print(f"[Error] Launch as admin failed: {e}")
 
     def _show_in_explorer(self, path):
         try:
-            # Windows command to open explorer with file selected
-            subprocess.run(['explorer', '/select,', path])
+            subprocess.run(['explorer', '/select,', os.path.normpath(path)])
         except Exception as e:
             print(f"[Error] Show in explorer failed: {e}")
