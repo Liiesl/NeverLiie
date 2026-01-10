@@ -28,6 +28,66 @@ def format_val(f):
     """Legacy wrapper for backward compatibility if needed."""
     return format_full(f)
 
+def format_currency(val):
+    """
+    Formats currency values with special rules:
+    - Default to 2 decimal places
+    - If value < 1 and first 2 decimals are 0.00, expand until first non-zero digit
+    - If value >= 1, show up to 2 decimal places and remove trailing zeros
+    """
+    if val is None: return ""
+
+    # Take absolute value for comparisons, but preserve sign for display
+    is_negative = val < 0
+    abs_val = abs(val)
+
+    # Case 1: Value >= 1 - show up to 2 decimals, remove trailing zeros
+    if abs_val >= 1:
+        formatted = f"{abs_val:.2f}".rstrip('0').rstrip('.')
+    else:
+        # Case 2: Value < 1
+        # Check if first 2 decimals are 0.00
+        rounded_2dp = round(abs_val, 2)
+        if rounded_2dp == 0:
+            # Find first non-zero digit position
+            str_val = f"{abs_val:.15f}"
+            after_decimal = str_val.split('.')[1]
+            first_non_zero = None
+            for i, digit in enumerate(after_decimal):
+                if digit != '0':
+                    first_non_zero = i + 1
+                    break
+
+            if first_non_zero:
+                formatted = f"{abs_val:.{first_non_zero}f}".rstrip('0').rstrip('.')
+            else:
+                formatted = "0"
+        else:
+            # Not all zeros, use up to 2 decimals, remove trailing zeros
+            formatted = f"{abs_val:.2f}".rstrip('0').rstrip('.')
+
+    # Add sign back if negative
+    if is_negative:
+        formatted = f"-{formatted}"
+
+    # Add comma separators for thousands
+    try:
+        if '.' in formatted:
+            int_part, dec_part = formatted.split('.')
+            if int_part and int_part != '0':
+                formatted_int = f"{int(int_part):,}"
+                formatted = f"{formatted_int}.{dec_part}"
+            else:
+                # Keep leading zero for values < 1
+                formatted = f"{int_part}.{dec_part}"
+        else:
+            if formatted and formatted != '0':
+                formatted = f"{int(float(formatted)):,}"
+    except:
+        pass
+
+    return formatted
+
 class ConverterWidget(QWidget):
     def __init__(self, input_data, output_data_list):
         """

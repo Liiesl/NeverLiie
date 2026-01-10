@@ -12,7 +12,10 @@ try:
 except ImportError:
     HAS_YFINANCE = False
 
+from PySide6.QtGui import QGuiApplication
+from api.types import ResultItem, Action
 from .base import BaseCategory
+from .. import utils
 
 class CurrencyCategory(BaseCategory):
     def __init__(self):
@@ -149,12 +152,91 @@ class CurrencyCategory(BaseCategory):
             threading.Thread(target=self._update_process, daemon=True).start()
 
     def get_specific_result(self, val, src_unit_str, target_unit_str):
-        """Override to add source info to description."""
-        results = super().get_specific_result(val, src_unit_str, target_unit_str)
-        if results:
-            # Update the description of the result item to show data source
-            results[0].description = f"Rate Source: {self.last_updated_str}"
-        return results
+        """Override to add source info to description and use currency formatting."""
+        src_data = self.get_details(src_unit_str)
+        tgt_data = self.get_details(target_unit_str)
+
+        if not src_data or not tgt_data: return []
+
+        res = self.convert(val, src_unit_str, target_unit_str)
+        if res is None: return []
+
+        # Use currency format for both input and output
+        disp_val = utils.format_currency(res)
+        input_val_str = utils.format_currency(val)
+
+        title = f"{input_val_str} {src_data['display_name']} = {disp_val} {tgt_data['display_name']}"
+
+        def factory():
+            return utils.ConverterWidget(
+                input_data=(
+                    input_val_str,
+                    src_data['symbol'],
+                    src_data['display_name']),
+                output_data_list=[(
+                    disp_val,
+                    tgt_data['symbol'],
+                    tgt_data['display_name'])]
+            )
+
+        return [ResultItem(
+            id="unit_specific",
+            name=title,
+            description=f"Rate Source: {self.last_updated_str}",
+            score=1000,
+            widget_factory=factory,
+            height=100,
+            action=Action("Copy Result", lambda: QGuiApplication.clipboard().setText(str(round(res, 10)).rstrip('0').rstrip('.')))
+        )]
+
+    def get_auto_results(self, val, src_unit_str):
+        """Override to use currency formatting."""
+        src_data = self.get_details(src_unit_str)
+        if not src_data: return []
+
+        src_factor = src_data['factor']
+        src_symbol = src_data['symbol']
+        src_name = src_data['display_name']
+
+        results_data = []
+
+        for t_symbol in self.default_targets:
+            if t_symbol not in self.definitions: continue
+
+            t_data = self.definitions[t_symbol]
+            t_factor = t_data['factor']
+
+            if abs(src_factor - t_factor) < 1e-9: continue
+
+            res = (val * src_factor) / t_factor
+
+            results_data.append((
+                utils.format_currency(res),
+                t_symbol,
+                t_data['display_name']
+            ))
+
+            if len(results_data) >= 3: break
+
+        if not results_data: return []
+
+        def factory():
+            return utils.ConverterWidget(
+                input_data=(utils.format_currency(val), src_symbol, src_name),
+                output_data_list=results_data
+            )
+
+        copy_str = " | ".join([f"{utils.format_currency((val * src_factor) / self.definitions[r[1]]['factor'])} {r[1]}" for r in results_data])
+
+        return [ResultItem(
+            id=f"unit_auto_{src_symbol}",
+            name=f"Convert {src_name}",
+            description=f"Currency conversion for {utils.format_currency(val)} {src_symbol}",
+            score=100,
+            widget_factory=factory,
+            height=100,
+            action=Action("Copy All", lambda: QGuiApplication.clipboard().setText(copy_str))
+        )]
 
     def _update_process(self):
         if not self.cache_file: return
