@@ -7,14 +7,15 @@ from .. import utils
 class TemperatureCategory(BaseCategory):
     def __init__(self):
         super().__init__()
-        self.default_targets = ["c", "f", "k"]
+        self.default_targets = ["c", "f", "k", "r"]
         
         # We only use definitions for display names and aliases here.
         # Factors are ignored because we override the math logic.
         self.definitions = {
             "c": { "factor": 0, "display_name": "Celsius", "aliases": ["°c", "degc", "celsius"] },
             "f": { "factor": 0, "display_name": "Fahrenheit", "aliases": ["°f", "degf", "fahrenheit"] },
-            "k": { "factor": 0, "display_name": "Kelvin", "aliases": ["kelvin"] }
+            "k": { "factor": 0, "display_name": "Kelvin", "aliases": ["kelvin"] },
+            "r": { "factor": 0, "display_name": "Rankine", "aliases": ["°r", "degr", "rankine"] }
         }
         self._build_lookup()
 
@@ -22,12 +23,14 @@ class TemperatureCategory(BaseCategory):
         if unit == 'c': return val
         if unit == 'f': return (val - 32) * 5/9
         if unit == 'k': return val - 273.15
+        if unit == 'r': return (val - 491.67) * 5/9
         return val
 
     def _from_celsius(self, val_c, target_unit):
         if target_unit == 'c': return val_c
         if target_unit == 'f': return (val_c * 9/5) + 32
         if target_unit == 'k': return val_c + 273.15
+        if target_unit == 'r': return (val_c * 9/5) + 491.67
         return val_c
 
     def convert(self, val, src_unit_str, target_unit_str):

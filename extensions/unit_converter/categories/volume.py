@@ -58,10 +58,65 @@ class VolumeCategory(BaseCategory):
                 "display_name": "Cubic Meter",
                 "aliases": ["cubicmeter", "m^3", "m³"]
             },
-             "ft3": {
+            "ft3": {
                 "factor": 28.3168,
                 "display_name": "Cubic Foot",
                 "aliases": ["cubicfoot", "ft^3", "ft³"]
+            },
+            "mm3": {
+                "factor": 1e-9,
+                "display_name": "Cubic Millimeter",
+                "aliases": ["cubicmm", "mm^3", "mm³", "millimeter3"]
+            },
+            "cm3": {
+                "factor": 0.001,
+                "display_name": "Cubic Centimeter",
+                "aliases": ["cc", "cubiccm", "cm^3", "cm³", "centimeter3"]
+            },
+            "dm3": {
+                "factor": 1.0,
+                "display_name": "Cubic Decimeter",
+                "aliases": ["cubicdm", "dm^3", "dm³", "decimeter3"]
+            },
+            "µL": {
+                "factor": 0.000001,
+                "display_name": "Microliter",
+                "aliases": ["ul", "microliter", "microliters", "mcl", "microlitre"]
+            },
+            "nL": {
+                "factor": 1e-9,
+                "display_name": "Nanoliter",
+                "aliases": ["nl", "nanoliter", "nanoliters", "nanolitre"]
+            },
+            "minim": {
+                "factor": 0.0000616115,
+                "display_name": "Minim",
+                "aliases": ["minim", "minims"]
+            },
+            "gill": {
+                "factor": 0.118294,
+                "display_name": "Gill (US)",
+                "aliases": ["gill", "gills"]
+            },
+            "fldr": {
+                "factor": 0.00369669,
+                "display_name": "Fluid Dram",
+                "aliases": ["fluiddram", "fluiddrams", "fl dram", "fl drams"]
+            },
+            "bu": {
+                "factor": 35.2391,
+                "display_name": "Bushel (US)",
+                "aliases": ["bushel", "bushels"]
+            },
+            "pk": {
+                "factor": 8.80977,
+                "display_name": "Peck (US)",
+                "aliases": ["peck", "pecks"]
+            },
+            "bbl": {
+                "factor": 158.987,
+                "display_name": "Barrel (Petroleum)",
+                "aliases": ["barrel", "barrels", "oilbarrel"]
             }
         }
         self._build_lookup()

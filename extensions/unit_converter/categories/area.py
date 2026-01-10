@@ -42,6 +42,36 @@ class AreaCategory(BaseCategory):
                 "factor": 2589988.11,
                 "display_name": "Square Mile",
                 "aliases": ["mi2", "mi^2", "mile2"]
+            },
+            "sqyd": {
+                "factor": 0.836127,
+                "display_name": "Square Yard",
+                "aliases": ["yd2", "yd^2", "sqyard", "squareyard"]
+            },
+            "dm2": {
+                "factor": 0.01,
+                "display_name": "Square Decimeter",
+                "aliases": ["sqdm", "dm^2", "dm²", "decimeter2"]
+            },
+            "cm2": {
+                "factor": 0.0001,
+                "display_name": "Square Centimeter",
+                "aliases": ["sqcm", "cm^2", "cm²", "centimeter2"]
+            },
+            "mm2": {
+                "factor": 0.000001,
+                "display_name": "Square Millimeter",
+                "aliases": ["sqmm", "mm^2", "mm²", "millimeter2"]
+            },
+            "a": {
+                "factor": 100.0,
+                "display_name": "Are",
+                "aliases": ["are", "ares"]
+            },
+            "barn": {
+                "factor": 1e-28,
+                "display_name": "Barn",
+                "aliases": ["barns"]
             }
         }
         self._build_lookup()

@@ -4,7 +4,7 @@ from .base import BaseCategory
 class StorageCategory(BaseCategory):
     def __init__(self):
         super().__init__()
-        self.default_targets = ["b", "kb", "mb", "gb", "tb"]
+        self.default_targets = ["b", "kb", "mb", "gb"]
         
         # Base unit: Byte (B)
         # Using Binary prefixes (1024) which is standard for OS reporting
@@ -43,6 +43,46 @@ class StorageCategory(BaseCategory):
                 "factor": 1125899906842624.0, # 1024^5
                 "display_name": "Petabyte",
                 "aliases": ["pib", "petabytes"]
+            },
+            "Kb": {
+                "factor": 128.0, # 1024 bits / 8
+                "display_name": "Kilobit",
+                "aliases": ["kbit", "kilobit", "kilobits"]
+            },
+            "Mb": {
+                "factor": 131072.0, # 1024^2 bits / 8
+                "display_name": "Megabit",
+                "aliases": ["mbit", "megabit", "megabits"]
+            },
+            "Gb": {
+                "factor": 134217728.0, # 1024^3 bits / 8
+                "display_name": "Gigabit",
+                "aliases": ["gbit", "gigabit", "gigabits"]
+            },
+            "Tb": {
+                "factor": 137438953472.0, # 1024^4 bits / 8
+                "display_name": "Terabit",
+                "aliases": ["tbit", "terabit", "terabits"]
+            },
+            "Pb": {
+                "factor": 140737488355328.0, # 1024^5 bits / 8
+                "display_name": "Petabit",
+                "aliases": ["pbit", "petabit", "petabits"]
+            },
+            "eb": {
+                "factor": 1152921504606846976.0, # 1024^6
+                "display_name": "Exabyte",
+                "aliases": ["eib", "eb", "exabyte", "exabytes"]
+            },
+            "zb": {
+                "factor": 1180591620717411303424.0, # 1024^7
+                "display_name": "Zettabyte",
+                "aliases": ["zib", "zb", "zettabyte", "zettabytes"]
+            },
+            "yb": {
+                "factor": 1208925819614629174706176.0, # 1024^8
+                "display_name": "Yottabyte",
+                "aliases": ["yib", "yb", "yottabyte", "yottabytes"]
             }
         }
         self._build_lookup()
