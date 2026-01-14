@@ -1,3 +1,6 @@
 [submodule "launcher"]
 	path = launcher
 	url = https://github.com/Liiesl/NeverLiieLauncher.git
+[submodule "terminal"]
+	path = terminal
+	url = https://github.com/Liiesl/NeverLiieTerm.git
