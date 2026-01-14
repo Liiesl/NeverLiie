@@ -1,0 +1,33 @@
+name: Update Submodules
+
+on:
+  repository_dispatch:
+    types: [update-submodules]
+  workflow_dispatch: # Allows manual clicking if needed
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.PAT_TOKEN }} # Important for pushing back
+          submodules: recursive
+
+      - name: Update Submodules
+        run: |
+          git submodule update --remote --recursive
+
+      - name: Commit and Push Changes
+        run: |
+          git config user.name "GitHub Actions"
+          git config user.email "actions@github.com"
+          # Check if there are changes before committing
+          if [[ -n $(git status -s) ]]; then
+            git add .
+            git commit -m "Auto-update submodules from child repo push"
+            git push
+          else
+            echo "No changes in submodules."
+          fi
