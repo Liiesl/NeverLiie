@@ -4,3 +4,6 @@
 [submodule "terminal"]
 	path = terminal
 	url = https://github.com/Liiesl/NeverLiieTerm.git
+[submodule "statusbar"]
+	path = statusbar
+	url = https://github.com/Liiesl/NeverLiieStatusBar.git
