@@ -3,7 +3,7 @@ name: Update Submodules
 on:
   repository_dispatch:
     types: [update-submodules]
-  workflow_dispatch: # Allows manual clicking if needed
+  workflow_dispatch: 
 
 jobs:
   update:
@@ -12,7 +12,7 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v4
         with:
-          token: ${{ secrets.PAT_TOKEN }} # Important for pushing back
+          token: ${{ secrets.PAT_TOKEN }}
           submodules: recursive
 
       - name: Update Submodules
@@ -21,13 +21,16 @@ jobs:
 
       - name: Commit and Push Changes
         run: |
-          git config user.name "GitHub Actions"
-          git config user.email "actions@github.com"
-          # Check if there are changes before committing
+          git config user.name "NeverLiie Bot"
+          git config user.email "bot@neverliie.com"
+
+          MODULE_NAME="${{ github.event.client_payload.module_name }}"
+          if [ -z "$MODULE_NAME" ]; then MODULE_NAME="all"; fi
+
           if [[ -n $(git status -s) ]]; then
             git add .
-            git commit -m "Auto-update submodules from child repo push"
+            git commit -m "chore: update submodule $MODULE_NAME to latest branch"
             git push
           else
-            echo "No changes in submodules."
+            echo "No changes detected."
           fi
