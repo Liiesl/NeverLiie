@@ -7,7 +7,11 @@ from .server import IPCServer
 from .client import IPCClient, IPCStream
 
 class RemoteExecutionError(Exception):
-    """Raised when the remote function fails."""
+    """Raised when the remote function fails (logic error on server)."""
+    pass
+
+class PeerOfflineError(Exception):
+    """Raised when the target process is not running or unreachable."""
     pass
 
 class RemotePeer:
@@ -79,17 +83,58 @@ class NeverLiieIPC:
         """Returns a proxy object for the target application."""
         return RemotePeer(self, target_name)
 
+    # --- LIFECYCLE MANAGEMENT ---
+    def ping(self, target_name):
+        """
+        Checks if a target is online.
+        Returns: True/False
+        """
+        conn = IPCClient.connect(target_name)
+        if conn:
+            try:
+                conn.close()
+                return True
+            except:
+                return False
+        return False
+
+    def wake(self, target_name, timeout=5.0):
+        """
+        Explicitly attempts to launch the target from the registry.
+        Blocks until the target is online or timeout is reached.
+        
+        Returns: True if online.
+        Raises: PeerOfflineError if launch fails or times out.
+        """
+        if self.ping(target_name):
+            return True
+
+        # Attempt Launch
+        print(f"[IPC] Waking {target_name}...")
+        launched = self.registry.launch_target(target_name)
+        
+        if not launched:
+            raise PeerOfflineError(f"Could not launch '{target_name}'. Registry entry missing or invalid.")
+
+        # Wait for startup (Ping loop)
+        start_time = time.time()
+        while (time.time() - start_time) < timeout:
+            if self.ping(target_name):
+                return True
+            time.sleep(0.1)
+
+        raise PeerOfflineError(f"Launched '{target_name}', but it did not respond within {timeout}s.")
+
     # --- EXECUTION LOGIC ---
     def call(self, target, method, *args, **kwargs):
         """
         Calls a remote method. 
-        Auto-launches target if missing.
-        Unwraps result or Raises RemoteExecutionError.
+        Raises PeerOfflineError if target is down.
         """
         response = self._send(target, method, args, kwargs, stream=False)
         
         if response is None:
-             raise ConnectionError(f"Could not connect to '{target}' (Start failed or timed out)")
+             raise PeerOfflineError(f"Target '{target}' is offline.")
 
         status = response.get("status")
         if status == "ok":
@@ -107,18 +152,12 @@ class NeverLiieIPC:
         # 1. Try to connect
         conn = self._connect_to_target(target, method, args, kwargs)
         
-        # 2. If failed, auto-launch and retry
+        # 2. If failed, DO NOT auto-launch. Fail immediately.
         if not conn:
-            print(f"[IPC] {target} offline. Checking registry...")
-            if self.registry.launch_target(target):
-                time.sleep(1.5) # Wait for app to startup
-                conn = self._connect_to_target(target, method, args, kwargs)
+            if stream: raise PeerOfflineError(f"Target '{target}' is offline.")
+            return None
 
-        # 3. Handle connection failure
-        if not conn:
-            return None if not stream else []
-
-        # 4. Process Response
+        # 3. Process Response
         if stream:
             header = conn.recv()
             if header.get("status") == "stream_start":
@@ -144,8 +183,6 @@ class NeverLiieIPC:
         conn = IPCClient.connect(target)
         if conn:
             try:
-                # Filter out local kwargs meant for IPC logic (like _timeout)
-                # Note: We pop them in 'call' usually, but safe to filter here too if needed
                 conn.send({"method": method, "args": args, "kwargs": kwargs})
                 return conn
             except:
