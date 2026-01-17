@@ -98,32 +98,23 @@ class NeverLiieIPC:
                 return False
         return False
 
-    def wake(self, target_name, timeout=5.0):
+    def wake(self, target_name):
         """
         Explicitly attempts to launch the target from the registry.
-        Blocks until the target is online or timeout is reached.
+        Fire-and-Forget: Does not wait for the target to come online.
         
-        Returns: True if online.
-        Raises: PeerOfflineError if launch fails or times out.
+        Returns: True if launch command was initiated (or already online).
+        Returns: False if registry entry is missing.
         """
+        # Optimization: If already running, we consider it "woken"
         if self.ping(target_name):
             return True
 
         # Attempt Launch
-        print(f"[IPC] Waking {target_name}...")
+        print(f"[IPC] Waking {target_name} (Fire-and-Forget)...")
         launched = self.registry.launch_target(target_name)
         
-        if not launched:
-            raise PeerOfflineError(f"Could not launch '{target_name}'. Registry entry missing or invalid.")
-
-        # Wait for startup (Ping loop)
-        start_time = time.time()
-        while (time.time() - start_time) < timeout:
-            if self.ping(target_name):
-                return True
-            time.sleep(0.1)
-
-        raise PeerOfflineError(f"Launched '{target_name}', but it did not respond within {timeout}s.")
+        return launched
 
     # --- EXECUTION LOGIC ---
     def call(self, target, method, *args, **kwargs):

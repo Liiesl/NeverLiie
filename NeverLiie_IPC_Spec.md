@@ -77,8 +77,12 @@ def update_ui():
         print("Status bar is sleeping. Waking...")
         try:
             # 'wake' reads the registry and launches the app.
-            # It blocks until the app responds to pings or times out.
-            ipc.wake('statusbar', timeout=5.0)
+            # It is Fire-and-Forget: it returns immediately without waiting for the app to load.
+            ipc.wake('statusbar')
+            
+            # Since wake is non-blocking, you may need to wait or retry calls
+            # if you need immediate data, or let the next update loop handle it.
+            return 
         except PeerOfflineError:
             print("Failed to wake statusbar (Application missing?).")
             return
@@ -133,7 +137,7 @@ Initializes the IPC node.
 
 ### Lifecycle Methods
 *   `ipc.ping(target_name)`: Returns `bool`. Checks if target is currently running.
-*   `ipc.wake(target_name, timeout=5.0)`: Returns `True` or raises `PeerOfflineError`. Explicitly launches the target from registry and waits for it to become responsive.
+*   `ipc.wake(target_name)`: Returns `bool`. Explicitly launches the target from registry (Fire-and-Forget). Returns `True` if the launch command was initiated successfully, `False` if the registry entry is missing.
 
 ### `ipc.expose`
 Decorator. Registers a function to be callable remotely.
