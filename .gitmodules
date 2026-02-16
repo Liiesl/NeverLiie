@@ -7,3 +7,6 @@
 [submodule "statusbar"]
 	path = statusbar
 	url = https://github.com/Liiesl/NeverLiieStatusBar.git
+[submodule "packagemanager"]
+	path = packagemanager
+	url = https://github.com/Liiesl/NeverLiiePackageManager.git
